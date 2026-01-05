@@ -46,6 +46,32 @@ class FFmpegCommandBuilder {
   }
 
   /**
+   * Procesa el mapeo de streams (video_stream_index, audio_stream_index)
+   * Debe llamarse DESPUÉS del input (-i) pero ANTES de los codecs
+   */
+  _processStreamMapping(args, ffmpegParams) {
+    if (!ffmpegParams) return;
+
+    // Mapear stream de video
+    if (ffmpegParams.video_stream_index !== undefined) {
+      const videoIndex = parseInt(ffmpegParams.video_stream_index);
+      args.push('-map', `0:v:${videoIndex}`);
+    } else if (ffmpegParams.audio_stream_index !== undefined) {
+      // Si solo se especifica audio, mapear el primer video por defecto
+      args.push('-map', '0:v:0');
+    }
+
+    // Mapear stream de audio
+    if (ffmpegParams.audio_stream_index !== undefined) {
+      const audioIndex = parseInt(ffmpegParams.audio_stream_index);
+      args.push('-map', `0:a:${audioIndex}`);
+    } else if (ffmpegParams.video_stream_index !== undefined) {
+      // Si solo se especifica video, mapear el primer audio por defecto
+      args.push('-map', '0:a:0');
+    }
+  }
+
+  /**
    * Procesa parámetros de encoding específicos (preset, tune, profile, etc.)
    */
   _processEncodingParams(args, ffmpegParams) {
@@ -140,6 +166,11 @@ class FFmpegCommandBuilder {
 
     // Input
     args.push('-i', channel.input_url);
+
+    // Mapeo de streams (DESPUÉS de -i, ANTES de codecs)
+    if (channel.ffmpeg_params) {
+      this._processStreamMapping(args, channel.ffmpeg_params);
+    }
 
     // Parámetros de FFmpeg desde la configuración
     if (channel.ffmpeg_params) {
@@ -255,28 +286,36 @@ class FFmpegCommandBuilder {
     // Input
     args.push('-i', channel.input_url);
 
-    // Mapeo de streams para MPEG-TS (importante para VLC)
-    // Mapear explícitamente video y audio para asegurar compatibilidad con VLC
-    // Si hay múltiples programas en el input HLS, seleccionar el primero por defecto
-    if (udpOutput.map_video !== false) {
-      // Si se especifica un índice de programa específico
-      if (udpOutput.hls_program_index !== undefined) {
-        const programIndex = parseInt(udpOutput.hls_program_index);
-        args.push('-map', `0:p:${programIndex}:v`);
-      } else {
-        // Mapear el primer stream de video disponible
-        args.push('-map', '0:v:0');
+    // Mapeo de streams (DESPUÉS de -i, ANTES de codecs)
+    // Prioridad: video_stream_index/audio_stream_index > hls_program_index > map_video/map_audio
+    if (channel.ffmpeg_params?.video_stream_index !== undefined ||
+      channel.ffmpeg_params?.audio_stream_index !== undefined) {
+      // Usar índices de stream específicos si están definidos
+      this._processStreamMapping(args, channel.ffmpeg_params);
+    } else {
+      // Mapeo de streams para MPEG-TS (importante para VLC)
+      // Mapear explícitamente video y audio para asegurar compatibilidad con VLC
+      // Si hay múltiples programas en el input HLS, seleccionar el primero por defecto
+      if (udpOutput.map_video !== false) {
+        // Si se especifica un índice de programa específico
+        if (udpOutput.hls_program_index !== undefined) {
+          const programIndex = parseInt(udpOutput.hls_program_index);
+          args.push('-map', `0:p:${programIndex}:v`);
+        } else {
+          // Mapear el primer stream de video disponible
+          args.push('-map', '0:v:0');
+        }
       }
-    }
 
-    if (udpOutput.map_audio !== false) {
-      // Si se especifica un índice de programa específico
-      if (udpOutput.hls_program_index !== undefined) {
-        const programIndex = parseInt(udpOutput.hls_program_index);
-        args.push('-map', `0:p:${programIndex}:a`);
-      } else {
-        // Mapear el primer stream de audio disponible
-        args.push('-map', '0:a:0');
+      if (udpOutput.map_audio !== false) {
+        // Si se especifica un índice de programa específico
+        if (udpOutput.hls_program_index !== undefined) {
+          const programIndex = parseInt(udpOutput.hls_program_index);
+          args.push('-map', `0:p:${programIndex}:a`);
+        } else {
+          // Mapear el primer stream de audio disponible
+          args.push('-map', '0:a:0');
+        }
       }
     }
 
@@ -439,6 +478,11 @@ class FFmpegCommandBuilder {
 
     args.push('-i', channel.input_url);
 
+    // Mapeo de streams (DESPUÉS de -i, ANTES de codecs)
+    if (channel.ffmpeg_params) {
+      this._processStreamMapping(args, channel.ffmpeg_params);
+    }
+
     // Parámetros de transcodificación
     if (channel.ffmpeg_params) {
       if (channel.ffmpeg_params.video_codec) {
@@ -512,6 +556,11 @@ class FFmpegCommandBuilder {
     const dvbDevice = channel.ffmpeg_params?.dvb_device || '/dev/dvb/adapter0/frontend0';
     args.push('-f', 'dvb');
     args.push('-i', dvbDevice);
+
+    // Mapeo de streams (DESPUÉS de -i, ANTES de codecs)
+    if (channel.ffmpeg_params) {
+      this._processStreamMapping(args, channel.ffmpeg_params);
+    }
 
     // Parámetros de sintonización DVB
     if (channel.ffmpeg_params?.dvb_frequency) {
