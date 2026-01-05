@@ -1,0 +1,25 @@
+COMANDOS PARA REINICIAR LA BASE DE DATOS
+=========================================
+
+Ejecuta estos comandos en orden:
+
+1. Detener y eliminar volúmenes:
+   sudo docker compose down -v
+
+2. Reiniciar contenedores:
+   sudo docker compose up -d --build
+
+3. Esperar 15 segundos y ejecutar script de inicialización:
+   sleep 15
+   sudo docker exec -it atlas_app node scripts/create-user.js
+
+4. Verificar que el usuario se creó:
+   sudo docker exec -it atlas_db psql -U atlas_user -d atlas_metadata -c "SELECT username FROM users;"
+
+O ejecuta el script automático:
+   sudo bash scripts/ejecutar-reset.sh
+
+CREDENCIALES DEL USUARIO INICIAL:
+- Username: atlas
+- Password: atlas123$
+

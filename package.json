@@ -1,0 +1,24 @@
+{
+  "name": "atlas-media-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["media", "server", "ffmpeg", "streaming"],
+  "author": "",
+  "license": "ISC",
+  "description": "Atlas Media Server - Gestor profesional de procesos FFmpeg",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "cors": "^2.8.5",
+    "express": "^5.2.1",
+    "fluent-ffmpeg": "^2.1.3",
+    "fs-extra": "^11.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3",
+    "socket.io": "^4.7.5",
+    "uuid": "^10.0.0"
+  }
+}
