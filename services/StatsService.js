@@ -7,6 +7,57 @@ class StatsService {
   constructor() {
     this.updateInterval = 2000; // Actualizar cada 2 segundos
     this.intervals = new Map(); // Map<channelId, intervalId>
+    this.previousNetworkStats = new Map(); // Map<channelId, {rxBytes, txBytes, timestamp}>
+  }
+
+  /**
+   * Formatea bitrate a formato legible (Kbps, Mbps)
+   */
+  formatBitrate(bitsPerSecond) {
+    if (bitsPerSecond === 0) return '0 Kbps';
+    const mbps = bitsPerSecond / 1000000;
+    if (mbps >= 1) {
+      return `${mbps.toFixed(2)} Mbps`;
+    }
+    const kbps = bitsPerSecond / 1000;
+    return `${Math.round(kbps)} Kbps`;
+  }
+
+  /**
+   * Calcula las tasas de red (rxRate y txRate) comparando con valores anteriores
+   */
+  calculateNetworkRates(channelId, network) {
+    if (!network || network.rxBytes === undefined || network.txBytes === undefined) {
+      return;
+    }
+
+    const previous = this.previousNetworkStats.get(channelId);
+    const now = Date.now();
+
+    if (previous) {
+      const timeDiff = (now - previous.timestamp) / 1000; // en segundos
+
+      if (timeDiff > 0) {
+        // Calcular diferencia de bytes
+        const rxDiff = network.rxBytes - previous.rxBytes;
+        const txDiff = network.txBytes - previous.txBytes;
+
+        // Calcular tasas en bits por segundo (bytes * 8 / tiempo)
+        const rxRate = (rxDiff * 8) / timeDiff;
+        const txRate = (txDiff * 8) / timeDiff;
+
+        // Agregar tasas formateadas al objeto network
+        network.rxRate = this.formatBitrate(rxRate);
+        network.txRate = this.formatBitrate(txRate);
+      }
+    }
+
+    // Actualizar valores anteriores
+    this.previousNetworkStats.set(channelId, {
+      rxBytes: network.rxBytes,
+      txBytes: network.txBytes,
+      timestamp: now
+    });
   }
 
   /**
@@ -87,6 +138,11 @@ class StatsService {
       // Actualizar ffmpegStats en processInfo si existe
       if (status.processInfo && ffmpegStats) {
         status.processInfo.ffmpegStats = ffmpegStats;
+      }
+
+      // Calcular tasas de red (rxRate y txRate)
+      if (status.processInfo && status.processInfo.systemInfo && status.processInfo.systemInfo.network) {
+        this.calculateNetworkRates(channelId, status.processInfo.systemInfo.network);
       }
 
       // Log para debug
@@ -194,6 +250,11 @@ class StatsService {
             // Actualizar ffmpegStats en processInfo si existe
             if (status.processInfo && ffmpegStats) {
               status.processInfo.ffmpegStats = ffmpegStats;
+            }
+
+            // Calcular tasas de red (rxRate y txRate)
+            if (status.processInfo && status.processInfo.systemInfo && status.processInfo.systemInfo.network) {
+              this.calculateNetworkRates(channel.id, status.processInfo.systemInfo.network);
             }
 
             return {
