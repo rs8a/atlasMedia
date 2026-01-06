@@ -56,6 +56,10 @@ class HealthCheckManager {
       const runningChannels = await channelRepository.findRunningChannels();
       
       for (const channel of runningChannels) {
+        // Ignorar canales que están siendo reiniciados
+        if (channel.status === constants.CHANNEL_STATUS.RESTARTING) {
+          continue;
+        }
         await this.checkChannel(channel);
       }
     } catch (error) {
@@ -95,20 +99,52 @@ class HealthCheckManager {
           return;
         }
 
-        // Solo reiniciar si el estado sigue siendo RUNNING
+        // Solo reiniciar si el estado sigue siendo RUNNING y no está ya reiniciándose
         if (currentChannel.status === constants.CHANNEL_STATUS.RUNNING) {
           logger.warn(`Canal ${channel.id} (PID ${channel.pid}) ya no está corriendo`);
+          
+          // Verificar si ya hay un reinicio en progreso antes de actualizar el estado
+          // Esto evita condiciones de carrera donde múltiples componentes intentan reiniciar
+          const channelStatus = await channelRepository.findById(channel.id);
+          if (channelStatus && channelStatus.status === constants.CHANNEL_STATUS.RESTARTING) {
+            logger.info(`Canal ${channel.id} ya está siendo reiniciado, ignorando health check`);
+            return;
+          }
           
           await channelRepository.updateStatus(channel.id, constants.CHANNEL_STATUS.ERROR);
           await channelRepository.updatePid(channel.id, null);
 
           // Reinicio automático si está habilitado
           if (currentChannel.auto_restart) {
-            logger.info(`Reiniciando automáticamente canal ${channel.id}`);
-            setTimeout(() => {
-              ffmpegManager.restartChannel(channel.id).catch(err => {
+            // Verificar nuevamente el estado antes de reiniciar para evitar bucles
+            setTimeout(async () => {
+              try {
+                const updatedChannel = await channelRepository.findById(channel.id);
+                if (!updatedChannel) {
+                  logger.warn(`Canal ${channel.id} no encontrado antes de reinicio automático`);
+                  return;
+                }
+                
+                // No reiniciar si el canal fue detenido o ya está reiniciándose
+                if (updatedChannel.status === constants.CHANNEL_STATUS.STOPPED ||
+                    updatedChannel.status === constants.CHANNEL_STATUS.RESTARTING) {
+                  logger.info(`Canal ${channel.id} en estado ${updatedChannel.status}, cancelando reinicio automático`);
+                  return;
+                }
+                
+                // Verificar una vez más antes de reiniciar (triple verificación)
+                const finalCheck = await channelRepository.findById(channel.id);
+                if (finalCheck && (finalCheck.status === constants.CHANNEL_STATUS.STOPPED ||
+                    finalCheck.status === constants.CHANNEL_STATUS.RESTARTING)) {
+                  logger.info(`Canal ${channel.id} cambió de estado a ${finalCheck.status}, cancelando reinicio automático`);
+                  return;
+                }
+                
+                logger.info(`Reiniciando automáticamente canal ${channel.id}`);
+                await ffmpegManager.restartChannel(channel.id);
+              } catch (err) {
                 logger.error(`Error en reinicio automático de canal ${channel.id}:`, err);
-              });
+              }
             }, 5000);
           }
         }

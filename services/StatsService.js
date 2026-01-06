@@ -16,9 +16,13 @@ class StatsService {
       const channel = await channelService.getChannelById(channelId);
       const status = await channelService.getChannelStatus(channelId);
       
+      // Obtener estadísticas de FFmpeg
+      const ffmpegStats = ffmpegManager.getFFmpegStats(channelId);
+      
       return {
         channel: channel.toJSON(),
         process: status.processInfo,
+        ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -37,9 +41,13 @@ class StatsService {
         channels.map(async (channel) => {
           try {
             const status = await channelService.getChannelStatus(channel.id);
+            // Obtener estadísticas de FFmpeg
+            const ffmpegStats = ffmpegManager.getFFmpegStats(channel.id);
+            
             return {
               channel: channel.toJSON(),
               process: status.processInfo,
+              ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
               timestamp: new Date().toISOString()
             };
           } catch (error) {
@@ -47,6 +55,7 @@ class StatsService {
             return {
               channel: channel.toJSON(),
               process: null,
+              ffmpeg: null,
               error: error.message,
               timestamp: new Date().toISOString()
             };
