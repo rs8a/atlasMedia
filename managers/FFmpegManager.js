@@ -84,6 +84,11 @@ class FFmpegManager extends EventEmitter {
           // Procesar estadísticas de FFmpeg
           const stats = ffmpegStatsParser.processData(channelId, stderrData);
           if (stats) {
+            // Log para debug cuando se encuentran estadísticas
+            if (stats.bitrate) {
+              logger.debug(`[FFmpegStats] Canal ${channelId} - Bitrate: ${stats.bitrateFormatted}`);
+            }
+            
             // Actualizar estadísticas en el processInfo
             if (processInfo) {
               processInfo.stats = stats;
@@ -361,8 +366,15 @@ class FFmpegManager extends EventEmitter {
   getFFmpegStats(channelId) {
     const processInfo = this.activeProcesses.get(channelId);
     if (processInfo) {
-      return processInfo.stats || null;
+      if (processInfo.stats) {
+        logger.debug(`[FFmpegStats] Retornando stats para canal ${channelId}:`, processInfo.stats);
+        return processInfo.stats;
+      } else {
+        logger.debug(`[FFmpegStats] Canal ${channelId} no tiene estadísticas aún`);
+      }
+      return null;
     }
+    logger.debug(`[FFmpegStats] Canal ${channelId} no está en procesos activos`);
     return null;
   }
 

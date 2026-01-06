@@ -19,9 +19,11 @@ class FFmpegStatsParser {
   parseStatsLine(line) {
     // FFmpeg emite estadísticas con formato: frame=  123 fps= 25 q=28.0 size=    1024kB time=00:00:05.00 bitrate=1677.7kbits/s speed=1.0x
     // También puede tener formato: frame=  123 fps= 25 q=28.0 Lsize=    1024kB time=00:00:05.00 bitrate=1677.7kbits/s speed=1.0x
+    // O formato más simple: frame=  123 fps= 25 bitrate=1677.7kbits/s
     
-    // Buscar líneas que contengan estadísticas (típicamente tienen "frame=" y "fps=")
-    if (!line.includes('frame=') || !line.includes('fps=')) {
+    // Buscar líneas que contengan estadísticas (típicamente tienen "frame=")
+    // No requerir "fps=" porque puede no estar siempre presente
+    if (!line.includes('frame=')) {
       return null;
     }
 
@@ -69,14 +71,36 @@ class FFmpegStatsParser {
         stats.timeFormatted = `${timeMatch[1]}:${timeMatch[2]}:${timeMatch[3]}.${timeMatch[4]}`;
       }
 
-      // Extraer bitrate
-      const bitrateMatch = line.match(/bitrate=\s*([\d.]+)\s*(kbits\/s|mbits\/s)/i);
+      // Extraer bitrate - múltiples formatos posibles
+      // Formato 1: bitrate=1677.7kbits/s o bitrate=1.5mbits/s (más común)
+      let bitrateMatch = line.match(/bitrate=\s*([\d.]+)\s*(kbits\/s|mbits\/s|bits\/s|kb\/s|mb\/s)/i);
       if (bitrateMatch) {
         let bitrate = parseFloat(bitrateMatch[1]);
         const unit = bitrateMatch[2].toLowerCase();
-        if (unit === 'mbits/s') bitrate *= 1000; // Convertir a kbits/s
+        if (unit.includes('mbits') || unit.includes('mb/')) bitrate *= 1000; // Convertir a kbits/s
+        else if (unit.includes('bits/') || (unit.includes('bits') && !unit.includes('k'))) bitrate /= 1000; // Convertir bits/s a kbits/s
         stats.bitrate = bitrate; // en kbits/s
         stats.bitrateFormatted = `${bitrate.toFixed(2)} kbits/s`;
+      } else {
+        // Formato 2: bitrate= 1677.7k (sin /s)
+        bitrateMatch = line.match(/bitrate=\s*([\d.]+)\s*([km]?)/i);
+        if (bitrateMatch) {
+          let bitrate = parseFloat(bitrateMatch[1]);
+          const unit = bitrateMatch[2].toLowerCase();
+          if (unit === 'm') bitrate *= 1000; // Convertir a kbits/s
+          stats.bitrate = bitrate; // en kbits/s
+          stats.bitrateFormatted = `${bitrate.toFixed(2)} kbits/s`;
+        } else {
+          // Formato 3: bitrate N/A (calcular desde size y time si están disponibles)
+          // Esto se calculará después si tenemos size y time
+        }
+      }
+      
+      // Si no encontramos bitrate pero tenemos size y time, calcularlo
+      if (!stats.bitrate && stats.size && stats.time && stats.time > 0) {
+        // bitrate = (size * 8) / time (en kbits/s)
+        stats.bitrate = (stats.size * 8) / (stats.time * 1000); // Convertir bytes a kbits
+        stats.bitrateFormatted = `${stats.bitrate.toFixed(2)} kbits/s`;
       }
 
       // Extraer speed
@@ -136,9 +160,15 @@ class FFmpegStatsParser {
     for (const line of lines) {
       const trimmedLine = line.trim();
       if (trimmedLine) {
+        // Log para debug (solo líneas que parecen estadísticas)
+        if (trimmedLine.includes('frame=')) {
+          logger.debug(`[FFmpegStats] Canal ${channelId} - Línea: ${trimmedLine}`);
+        }
+        
         const stats = this.parseStatsLine(trimmedLine);
         if (stats) {
           lastStats = stats;
+          logger.debug(`[FFmpegStats] Canal ${channelId} - Stats parseadas:`, stats);
         }
       }
     }

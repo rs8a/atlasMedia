@@ -19,6 +19,17 @@ class StatsService {
       // Obtener estadísticas de FFmpeg
       const ffmpegStats = ffmpegManager.getFFmpegStats(channelId);
       
+      // Log para debug
+      if (ffmpegStats) {
+        logger.debug(`[StatsService] Canal ${channelId} tiene estadísticas FFmpeg:`, {
+          bitrate: ffmpegStats.bitrate,
+          fps: ffmpegStats.fps,
+          frame: ffmpegStats.frame
+        });
+      } else {
+        logger.debug(`[StatsService] Canal ${channelId} no tiene estadísticas FFmpeg aún`);
+      }
+      
       return {
         channel: channel.toJSON(),
         process: status.processInfo,
