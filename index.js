@@ -207,6 +207,21 @@ async function startServer() {
     }
   });
 
+  // Endpoint para limpiar visualizadores inactivos manualmente
+  app.post('/api/stats/viewers/cleanup', (req, res) => {
+    try {
+      const cleaned = viewerTracking.cleanupInactiveViewers();
+      res.json({
+        cleaned,
+        message: `Se limpiaron ${cleaned} visualizador(es) inactivo(s)`,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Error limpiando visualizadores:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Manejo de errores (debe ir al final)
   app.use(errorHandler);
 

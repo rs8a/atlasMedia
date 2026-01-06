@@ -51,7 +51,17 @@ async function killProcess(pid, signal = 'SIGTERM') {
  * Obtiene información de red de un proceso
  */
 async function getNetworkInfo(pid) {
-  if (!pid) return null;
+  if (!pid) {
+    return {
+      rxBytes: 0,
+      txBytes: 0,
+      totalBytes: 0,
+      activeConnections: 0,
+      rxBytesFormatted: '0 B',
+      txBytesFormatted: '0 B',
+      totalBytesFormatted: '0 B'
+    };
+  }
   
   try {
     let rxBytes = 0;
@@ -169,10 +179,16 @@ async function getProcessInfo(pid) {
       command: parts.slice(4).join(' ')
     };
     
-    // Agregar información de red si está disponible
-    if (networkInfo) {
-      processInfo.network = networkInfo;
-    }
+    // Agregar información de red (siempre, incluso si es 0)
+    processInfo.network = networkInfo || {
+      rxBytes: 0,
+      txBytes: 0,
+      totalBytes: 0,
+      activeConnections: 0,
+      rxBytesFormatted: '0 B',
+      txBytesFormatted: '0 B',
+      totalBytesFormatted: '0 B'
+    };
     
     return processInfo;
   } catch (error) {

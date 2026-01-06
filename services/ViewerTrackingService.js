@@ -7,8 +7,13 @@ class ViewerTrackingService {
     this.viewers = new Map();
     // Map<viewerId, { channelId, lastSeen, timeoutId }>
     this.viewerData = new Map();
-    this.inactivityTimeout = 45000; // 45 segundos sin actividad = desconectado
-    // (HLS típicamente actualiza cada 2-10 segundos, 45s es seguro)
+    this.inactivityTimeout = 15000; // 15 segundos sin actividad = desconectado
+    // (HLS típicamente actualiza cada 2-10 segundos, 15s es suficiente)
+
+    // Limpieza periódica cada 10 segundos para asegurar que se eliminen visualizadores inactivos
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupInactiveViewers();
+    }, 10000);
   }
 
   /**
@@ -17,15 +22,15 @@ class ViewerTrackingService {
    */
   generateViewerId(req) {
     // Intentar obtener IP real (considerando proxies)
-    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-               req.headers['x-real-ip'] || 
-               req.ip || 
-               req.connection?.remoteAddress ||
-               req.socket?.remoteAddress ||
-               'unknown';
-    
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+      req.headers['x-real-ip'] ||
+      req.ip ||
+      req.connection?.remoteAddress ||
+      req.socket?.remoteAddress ||
+      'unknown';
+
     const userAgent = req.get('user-agent') || 'unknown';
-    
+
     // Crear hash simple pero estable para la sesión
     // En producción, podrías usar cookies para un ID más preciso
     return crypto
@@ -45,7 +50,7 @@ class ViewerTrackingService {
 
     const channelViewers = this.viewers.get(channelId);
     const isNewViewer = !channelViewers.has(viewerId);
-    
+
     if (isNewViewer) {
       channelViewers.add(viewerId);
       logger.info(`Nuevo visualizador ${viewerId} en canal ${channelId}. Total: ${channelViewers.size}`);
@@ -56,7 +61,7 @@ class ViewerTrackingService {
     if (existingData) {
       // Limpiar timeout anterior
       clearTimeout(existingData.timeoutId);
-      
+
       // Si cambió de canal, actualizar
       if (existingData.channelId !== channelId) {
         // Remover del canal anterior
@@ -86,11 +91,16 @@ class ViewerTrackingService {
       this.removeViewer(viewerId);
     }, this.inactivityTimeout);
 
-    // Actualizar datos del visualizador
+    // Actualizar datos del visualizador (siempre actualizar lastSeen y timeoutId)
     const viewerInfo = this.viewerData.get(viewerId);
     if (viewerInfo) {
+      // Limpiar timeout anterior si existe
+      if (viewerInfo.timeoutId) {
+        clearTimeout(viewerInfo.timeoutId);
+      }
       viewerInfo.lastSeen = new Date();
       viewerInfo.timeoutId = timeoutId;
+      viewerInfo.channelId = channelId; // Actualizar canal por si acaso
     } else {
       this.viewerData.set(viewerId, {
         channelId,
@@ -171,20 +181,44 @@ class ViewerTrackingService {
   cleanupInactiveViewers() {
     const now = new Date();
     let cleaned = 0;
-    
+    const viewersToRemove = [];
+
+    // Identificar visualizadores inactivos
     this.viewerData.forEach((data, viewerId) => {
       const inactiveTime = now - data.lastSeen;
-      if (inactiveTime > this.inactivityTimeout) {
-        this.removeViewer(viewerId);
-        cleaned++;
+      // Usar un margen un poco más corto que el timeout para asegurar limpieza
+      if (inactiveTime > (this.inactivityTimeout - 2000)) {
+        viewersToRemove.push(viewerId);
       }
     });
-    
+
+    // Remover visualizadores inactivos
+    viewersToRemove.forEach(viewerId => {
+      this.removeViewer(viewerId);
+      cleaned++;
+    });
+
     if (cleaned > 0) {
-      logger.info(`Limpieza: ${cleaned} visualizadores inactivos removidos`);
+      logger.info(`Limpieza automática: ${cleaned} visualizador(es) inactivo(s) removido(s)`);
     }
-    
+
     return cleaned;
+  }
+
+  /**
+   * Limpia todos los visualizadores (útil para reset)
+   */
+  clearAll() {
+    // Limpiar todos los timeouts
+    this.viewerData.forEach((data) => {
+      if (data.timeoutId) {
+        clearTimeout(data.timeoutId);
+      }
+    });
+
+    this.viewers.clear();
+    this.viewerData.clear();
+    logger.info('Todos los visualizadores han sido limpiados');
   }
 }
 
