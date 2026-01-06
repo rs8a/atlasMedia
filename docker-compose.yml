@@ -11,6 +11,8 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - DB_HOST=localhost
       - DB_PORT=5432

@@ -1,3 +1,12 @@
+// Cargar variables de entorno desde .env (debe ser lo primero)
+// dotenv es opcional: si no está instalado, se usan las variables de entorno del sistema
+try {
+  require('dotenv').config();
+} catch (error) {
+  // dotenv no está instalado, continuar con variables de entorno del sistema
+  console.log('dotenv no disponible, usando variables de entorno del sistema');
+}
+
 const express = require('express');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
@@ -40,16 +49,16 @@ async function startServer() {
     try {
       const { nameToSlug } = require('./utils/slug');
       const slugFromUrl = decodeURIComponent(req.params.name);
-      
+
       // Buscar canal cuyo slug coincida con el de la URL
       const channel = await channelRepository.findBySlug(slugFromUrl);
-      
+
       if (!channel) {
         return res.status(404).json({ error: 'Canal no encontrado' });
       }
 
       const filePath = path.join(constants.MEDIA_BASE_PATH, channel.id, 'index.m3u8');
-      
+
       // Verificar que el archivo existe
       if (!(await fs.pathExists(filePath))) {
         return res.status(404).json({ error: 'Archivo no encontrado' });
@@ -71,7 +80,7 @@ async function startServer() {
       const { nameToSlug } = require('./utils/slug');
       const slugFromUrl = decodeURIComponent(req.params.name);
       const segment = req.params.segment;
-      
+
       // Solo servir archivos .ts
       if (!segment.endsWith('.ts')) {
         return next();
@@ -79,13 +88,13 @@ async function startServer() {
 
       // Buscar canal cuyo slug coincida con el de la URL
       const channel = await channelRepository.findBySlug(slugFromUrl);
-      
+
       if (!channel) {
         return res.status(404).json({ error: 'Canal no encontrado' });
       }
 
       const filePath = path.join(constants.MEDIA_BASE_PATH, channel.id, segment);
-      
+
       // Verificar que el archivo existe
       if (!(await fs.pathExists(filePath))) {
         return res.status(404).json({ error: 'Segmento no encontrado' });
@@ -120,7 +129,9 @@ async function startServer() {
     res.json({
       name: 'Atlas Media Server',
       status: 'running',
-      version: '1.0.0'
+      version: '1.0.0',
+      port: constants.PORT,
+      baseUrl: constants.BASE_URL
     });
   });
 
@@ -130,7 +141,7 @@ async function startServer() {
       // Verificar conexión a BD
       const db = require('./lib/db');
       await db.query('SELECT 1');
-      
+
       res.json({
         status: 'healthy',
         database: 'connected',
@@ -175,11 +186,11 @@ async function startServer() {
   httpServer.listen(constants.PORT, '0.0.0.0', async () => {
     logger.info(`Servidor Atlas listo en puerto ${constants.PORT}`);
     logger.info(`Socket.IO disponible en ws://0.0.0.0:${constants.PORT}`);
-    
+
     // Restaurar canales que estaban corriendo antes del reinicio del servidor
     // Esto se ejecuta solo al iniciar Docker/servidor
     await ffmpegManager.restoreChannelsOnStartup();
-    
+
     // Iniciar health check manager
     healthCheckManager.start();
     logger.info('HealthCheckManager iniciado');

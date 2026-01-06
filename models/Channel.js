@@ -71,11 +71,11 @@ class Channel {
       name: data.name,
       status: data.status,
       input_url: data.input_url,
-      ffmpeg_params: typeof data.ffmpeg_params === 'string' 
-        ? JSON.parse(data.ffmpeg_params) 
+      ffmpeg_params: typeof data.ffmpeg_params === 'string'
+        ? JSON.parse(data.ffmpeg_params)
         : data.ffmpeg_params,
-      outputs: typeof data.outputs === 'string' 
-        ? JSON.parse(data.outputs) 
+      outputs: typeof data.outputs === 'string'
+        ? JSON.parse(data.outputs)
         : data.outputs,
       auto_restart: data.auto_restart,
       pid: data.pid,
@@ -90,13 +90,15 @@ class Channel {
   toJSON() {
     const { nameToSlug } = require('../utils/slug');
     const slug = nameToSlug(this.name);
-    
+
     // Agregar URLs de salida para outputs HLS
     const outputsWithUrls = this.outputs.map(output => {
       if (output.type === 'hls') {
+        const relativePath = `/media/${encodeURIComponent(slug)}/index.m3u8`;
         return {
           ...output,
-          url: `/media/${encodeURIComponent(slug)}/index.m3u8`
+          url: relativePath,
+          fullUrl: `${constants.BASE_URL}${relativePath}`
         };
       }
       return output;
