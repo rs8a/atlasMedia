@@ -475,6 +475,81 @@ class FFmpegManager extends EventEmitter {
   getActiveProcesses() {
     return Array.from(this.activeProcesses.keys());
   }
+
+  /**
+   * Restaura canales que estaban corriendo antes del reinicio del servidor
+   * Se ejecuta solo al iniciar el servidor para restaurar el estado previo
+   */
+  async restoreChannelsOnStartup() {
+    try {
+      logger.info('Iniciando restauración de canales al arranque del servidor...');
+
+      // Buscar todos los canales con estado "running" en la BD
+      const runningChannels = await channelRepository.findRunningChannels();
+
+      if (runningChannels.length === 0) {
+        logger.info('No hay canales para restaurar');
+        return;
+      }
+
+      logger.info(`Encontrados ${runningChannels.length} canal(es) con estado 'running' para restaurar`);
+
+      // Procesar cada canal
+      for (const channel of runningChannels) {
+        try {
+          // Verificar si el proceso está realmente corriendo
+          let isProcessRunning = false;
+
+          if (channel.pid) {
+            isProcessRunning = await processUtils.isProcessRunning(channel.pid);
+          }
+
+          if (isProcessRunning) {
+            // El proceso está corriendo, agregarlo al Map de procesos activos
+            logger.info(`Canal ${channel.id} (${channel.name}) ya está corriendo con PID ${channel.pid}, agregando a procesos activos`);
+            // No necesitamos hacer nada más, el proceso ya está corriendo
+            continue;
+          }
+
+          // El proceso no está corriendo pero el estado es "running"
+          // Esto significa que el servidor se reinició y los procesos murieron
+          logger.info(`Canal ${channel.id} (${channel.name}) tiene estado 'running' pero el proceso no está corriendo, restaurando...`);
+
+          // Limpiar PID inválido
+          await channelRepository.updatePid(channel.id, null);
+
+          // Si el canal tiene auto_restart habilitado, reiniciarlo
+          if (channel.auto_restart) {
+            logger.info(`Reiniciando automáticamente canal ${channel.id} (${channel.name}) con auto_restart habilitado`);
+
+            // Esperar un poco antes de reiniciar para evitar conflictos
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Reiniciar el canal
+            const result = await this.restartChannel(channel.id);
+
+            if (result.success) {
+              logger.info(`Canal ${channel.id} (${channel.name}) restaurado exitosamente`);
+            } else {
+              logger.warn(`No se pudo restaurar canal ${channel.id} (${channel.name}): ${result.message}`);
+            }
+          } else {
+            // Si no tiene auto_restart, cambiar el estado a stopped
+            logger.info(`Canal ${channel.id} (${channel.name}) no tiene auto_restart, cambiando estado a 'stopped'`);
+            await channelRepository.updateStatus(channel.id, constants.CHANNEL_STATUS.STOPPED);
+          }
+        } catch (error) {
+          logger.error(`Error restaurando canal ${channel.id} (${channel.name}):`, error);
+          // Continuar con el siguiente canal aunque este falle
+        }
+      }
+
+      logger.info('Restauración de canales completada');
+    } catch (error) {
+      logger.error('Error en restoreChannelsOnStartup:', error);
+      // No lanzar el error para que el servidor pueda iniciar aunque falle la restauración
+    }
+  }
 }
 
 module.exports = new FFmpegManager();

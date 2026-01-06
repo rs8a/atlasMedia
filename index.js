@@ -172,9 +172,13 @@ async function startServer() {
   logger.info('Socket.IO configurado para estadísticas en tiempo real');
 
   // Iniciar servidor HTTP (que incluye Socket.IO)
-  httpServer.listen(constants.PORT, '0.0.0.0', () => {
+  httpServer.listen(constants.PORT, '0.0.0.0', async () => {
     logger.info(`Servidor Atlas listo en puerto ${constants.PORT}`);
     logger.info(`Socket.IO disponible en ws://0.0.0.0:${constants.PORT}`);
+    
+    // Restaurar canales que estaban corriendo antes del reinicio del servidor
+    // Esto se ejecuta solo al iniciar Docker/servidor
+    await ffmpegManager.restoreChannelsOnStartup();
     
     // Iniciar health check manager
     healthCheckManager.start();
