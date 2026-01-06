@@ -21,5 +21,8 @@ router.get('/:id/logs', channelController.getLogs.bind(channelController));
 router.delete('/:id/logs', channelController.deleteLogs.bind(channelController));
 router.get('/:id/stats', channelController.getStats.bind(channelController));
 
+// Ruta para analizar pistas de audio de un stream
+router.post('/analyze-audio', channelController.analyzeAudioTracks.bind(channelController));
+
 module.exports = router;
 

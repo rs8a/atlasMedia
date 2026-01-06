@@ -172,6 +172,29 @@ class ChannelController {
       next(error);
     }
   }
+
+  /**
+   * Analiza las pistas de audio de un stream
+   */
+  async analyzeAudioTracks(req, res, next) {
+    try {
+      const inputUrl = req.body.url;
+      
+      if (!inputUrl) {
+        return res.status(400).json({
+          error: 'Se requiere el parámetro "url" en el body con la URL del stream de origen'
+        });
+      }
+
+      const audioTracks = await channelService.analyzeAudioTracks(inputUrl);
+      res.json({
+        input_url: inputUrl,
+        audio_tracks: audioTracks
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
 
 module.exports = new ChannelController();

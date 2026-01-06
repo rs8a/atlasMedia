@@ -40,7 +40,7 @@ class ChannelService {
   async createChannel(channelData) {
     try {
       const channel = new Channel(channelData);
-      
+
       // Validar
       const validation = channel.validate();
       if (!validation.isValid) {
@@ -49,10 +49,10 @@ class ChannelService {
 
       // Crear en BD
       const created = await channelRepository.create(channel);
-      
+
       // Crear directorio de salida
       await fileSystem.ensureChannelDirectory(created.id);
-      
+
       logger.info(`Canal creado: ${created.id} - ${created.name}`);
       return created;
     } catch (error) {
@@ -78,7 +78,7 @@ class ChannelService {
         const hasRestrictedFields = Object.keys(channelData).some(
           key => !allowedFields.includes(key)
         );
-        
+
         if (hasRestrictedFields) {
           throw new Error('No se puede modificar la configuración de un canal en ejecución. Detén el canal primero.');
         }
@@ -227,6 +227,91 @@ class ChannelService {
     } catch (error) {
       logger.error(`Error en getChannelStatus(${id}):`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Analiza las pistas de audio disponibles en un stream usando ffprobe
+   */
+  async analyzeAudioTracks(inputUrl) {
+    const { exec } = require('child_process');
+    const { promisify } = require('util');
+    const execAsync = promisify(exec);
+
+    try {
+      // Usar ffprobe para obtener información del stream en formato JSON
+      const ffprobePath = constants.FFMPEG_PATH.replace('ffmpeg', 'ffprobe') || 'ffprobe';
+
+      // Comando ffprobe para obtener todos los streams en formato JSON
+      const command = `${ffprobePath} -v quiet -print_format json -show_streams "${inputUrl}"`;
+
+      logger.debug(`Ejecutando ffprobe para analizar audio: ${inputUrl}`);
+
+      // Ejecutar con timeout de 30 segundos
+      const { stdout, stderr } = await Promise.race([
+        execAsync(command, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Timeout: El análisis del stream tardó más de 30 segundos')), 30000)
+        )
+      ]);
+
+      if (stderr && !stdout) {
+        throw new Error(`Error ejecutando ffprobe: ${stderr}`);
+      }
+
+      let probeData;
+      try {
+        probeData = JSON.parse(stdout);
+      } catch (parseError) {
+        logger.error('Error parseando JSON de ffprobe:', parseError);
+        throw new Error(`Error procesando la respuesta de ffprobe: ${parseError.message}`);
+      }
+
+      // Extraer streams de audio
+      const audioStreams = (probeData.streams || []).filter(stream => stream.codec_type === 'audio');
+
+      if (audioStreams.length === 0) {
+        return {
+          count: 0,
+          tracks: [],
+          message: 'No se encontraron pistas de audio en el stream'
+        };
+      }
+
+      // Formatear información de cada pista
+      const tracks = audioStreams.map((stream, index) => ({
+        index: stream.index !== undefined ? stream.index : index,
+        stream_index: index, // Índice para usar en audio_stream_index
+        codec: stream.codec_name || 'unknown',
+        codec_long: stream.codec_long_name || stream.codec_name || 'unknown',
+        bitrate: stream.bit_rate ? `${Math.round(parseInt(stream.bit_rate) / 1000)}k` : null,
+        sample_rate: stream.sample_rate ? `${stream.sample_rate} Hz` : null,
+        channels: stream.channels || null,
+        channel_layout: stream.channel_layout || null,
+        language: stream.tags?.language || stream.tags?.LANGUAGE || null,
+        title: stream.tags?.title || stream.tags?.TITLE || null,
+        duration: stream.duration ? parseFloat(stream.duration).toFixed(2) + 's' : null
+      }));
+
+      return {
+        count: tracks.length,
+        tracks: tracks
+      };
+    } catch (error) {
+      logger.error(`Error analizando pistas de audio para ${inputUrl}:`, error);
+
+      // Mensajes de error más descriptivos
+      if (error.message.includes('Timeout')) {
+        throw new Error('El análisis del stream tardó demasiado. Verifica que la URL sea accesible.');
+      }
+      if (error.message.includes('ENOENT') || error.message.includes('ffprobe')) {
+        throw new Error('ffprobe no está disponible. Asegúrate de que FFmpeg esté instalado.');
+      }
+      if (error.message.includes('Connection refused') || error.message.includes('No route to host')) {
+        throw new Error('No se pudo conectar al stream. Verifica la URL y que el servidor esté accesible.');
+      }
+
+      throw new Error(`Error analizando pistas de audio: ${error.message}`);
     }
   }
 }
