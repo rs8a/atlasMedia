@@ -16,10 +16,10 @@ class StatsService {
     try {
       const channel = await channelService.getChannelById(channelId);
       const status = await channelService.getChannelStatus(channelId);
-      
+
       // Obtener estadísticas de FFmpeg
       let ffmpegStats = ffmpegManager.getFFmpegStats(channelId);
-      
+
       // Si no hay bitrate en las estadísticas de FFmpeg, intentar calcularlo
       if (ffmpegStats && (!ffmpegStats.bitrate || ffmpegStats.bitrate === null)) {
         // Primero intentar usar el bitrate configurado del canal (más confiable)
@@ -31,7 +31,7 @@ class StatsService {
           if (bitrateStr.includes('M') || bitrateStr.includes('m')) {
             configuredBitrate = bitrateNum * 1000;
           }
-          
+
           // Agregar bitrate de audio si está configurado
           if (channel.ffmpeg_params.audio_bitrate) {
             const audioBitrateStr = channel.ffmpeg_params.audio_bitrate.toString();
@@ -44,7 +44,7 @@ class StatsService {
             }
             configuredBitrate += audioBitrate;
           }
-          
+
           ffmpegStats.bitrate = configuredBitrate;
           ffmpegStats.bitrateFormatted = `${configuredBitrate.toFixed(2)} kbits/s`;
           ffmpegStats.bitrateSource = 'configured';
@@ -55,20 +55,20 @@ class StatsService {
           if (processInfo && processInfo.systemInfo && processInfo.systemInfo.network) {
             const network = processInfo.systemInfo.network;
             const processInfoData = await ffmpegManager.getProcessInfo(channelId);
-            
+
             if (processInfoData && processInfoData.startTime) {
               const now = new Date();
-              const startTime = processInfoData.startTime instanceof Date 
-                ? processInfoData.startTime 
+              const startTime = processInfoData.startTime instanceof Date
+                ? processInfoData.startTime
                 : new Date(processInfoData.startTime);
               const elapsedSeconds = (now - startTime) / 1000;
-              
+
               // Solo calcular si han pasado al menos 5 segundos (para tener datos más estables)
               if (elapsedSeconds >= 5 && network.txBytes > 0) {
                 // Calcular bitrate desde bytes transmitidos
                 // bitrate = (bytes * 8) / tiempo (en kbits/s)
                 const calculatedBitrate = (network.txBytes * 8) / (elapsedSeconds * 1000);
-                
+
                 // Validar que el bitrate sea razonable (menos de 50 Mbps = 50000 kbits/s)
                 // Si es demasiado alto, probablemente incluye datos de otras interfaces
                 if (calculatedBitrate > 0 && calculatedBitrate < 50000) {
@@ -83,7 +83,12 @@ class StatsService {
           }
         }
       }
-      
+
+      // Actualizar ffmpegStats en processInfo si existe
+      if (status.processInfo && ffmpegStats) {
+        status.processInfo.ffmpegStats = ffmpegStats;
+      }
+
       // Log para debug
       if (ffmpegStats) {
         logger.debug(`[StatsService] Canal ${channelId} tiene estadísticas FFmpeg:`, {
@@ -95,11 +100,10 @@ class StatsService {
       } else {
         logger.debug(`[StatsService] Canal ${channelId} no tiene estadísticas FFmpeg aún`);
       }
-      
+
       return {
         channel: channel.toJSON(),
         process: status.processInfo,
-        ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
         viewers: {
           count: viewerTracking.getViewerCount(channelId)
         },
@@ -123,7 +127,7 @@ class StatsService {
             const status = await channelService.getChannelStatus(channel.id);
             // Obtener estadísticas de FFmpeg
             let ffmpegStats = ffmpegManager.getFFmpegStats(channel.id);
-            
+
             // Si no hay bitrate en las estadísticas de FFmpeg, intentar calcularlo
             if (ffmpegStats && (!ffmpegStats.bitrate || ffmpegStats.bitrate === null)) {
               // Primero intentar usar el bitrate configurado del canal (más confiable)
@@ -135,7 +139,7 @@ class StatsService {
                 if (bitrateStr.includes('M') || bitrateStr.includes('m')) {
                   configuredBitrate = bitrateNum * 1000;
                 }
-                
+
                 // Agregar bitrate de audio si está configurado
                 if (channel.ffmpeg_params.audio_bitrate) {
                   const audioBitrateStr = channel.ffmpeg_params.audio_bitrate.toString();
@@ -148,7 +152,7 @@ class StatsService {
                   }
                   configuredBitrate += audioBitrate;
                 }
-                
+
                 ffmpegStats.bitrate = configuredBitrate;
                 ffmpegStats.bitrateFormatted = `${configuredBitrate.toFixed(2)} kbits/s`;
                 ffmpegStats.bitrateSource = 'configured';
@@ -159,19 +163,19 @@ class StatsService {
                 if (processInfo && processInfo.systemInfo && processInfo.systemInfo.network) {
                   const network = processInfo.systemInfo.network;
                   const processInfoData = await ffmpegManager.getProcessInfo(channel.id);
-                  
+
                   if (processInfoData && processInfoData.startTime) {
                     const now = new Date();
-                    const startTime = processInfoData.startTime instanceof Date 
-                      ? processInfoData.startTime 
+                    const startTime = processInfoData.startTime instanceof Date
+                      ? processInfoData.startTime
                       : new Date(processInfoData.startTime);
                     const elapsedSeconds = (now - startTime) / 1000;
-                    
+
                     // Solo calcular si han pasado al menos 5 segundos (para tener datos más estables)
                     if (elapsedSeconds >= 5 && network.txBytes > 0) {
                       // Calcular bitrate desde bytes transmitidos
                       const calculatedBitrate = (network.txBytes * 8) / (elapsedSeconds * 1000);
-                      
+
                       // Validar que el bitrate sea razonable (menos de 50 Mbps = 50000 kbits/s)
                       // Si es demasiado alto, probablemente incluye datos de otras interfaces
                       if (calculatedBitrate > 0 && calculatedBitrate < 50000) {
@@ -186,11 +190,15 @@ class StatsService {
                 }
               }
             }
-            
+
+            // Actualizar ffmpegStats en processInfo si existe
+            if (status.processInfo && ffmpegStats) {
+              status.processInfo.ffmpegStats = ffmpegStats;
+            }
+
             return {
               channel: channel.toJSON(),
               process: status.processInfo,
-              ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
               viewers: {
                 count: viewerTracking.getViewerCount(channel.id)
               },
@@ -201,7 +209,6 @@ class StatsService {
             return {
               channel: channel.toJSON(),
               process: null,
-              ffmpeg: null,
               viewers: {
                 count: viewerTracking.getViewerCount(channel.id)
               },
@@ -211,7 +218,7 @@ class StatsService {
           }
         })
       );
-      
+
       return stats;
     } catch (error) {
       logger.error('Error obteniendo estadísticas de todos los canales:', error);
