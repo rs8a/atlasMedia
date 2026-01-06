@@ -90,38 +90,61 @@ async function getNetworkInfo(pid) {
       logger.debug(`No se pudo leer /proc/${pid}/net/dev`);
     }
     
-    // Método 2: Si no obtuvimos datos, intentar usar lsof para obtener información de sockets
-    if (rxBytes === 0 && txBytes === 0) {
+    // Obtener conexiones activas del proceso usando ss o netstat
+    // Intentar con ss primero (más moderno y preciso)
+    try {
+      // ss muestra conexiones TCP/UDP con formato: ESTAB 0 0 192.168.1.12:3000 192.168.1.100:54321 users:(("ffmpeg",pid=123,fd=5))
+      const { stdout: ssOutput } = await execAsync(`ss -tnp 2>/dev/null | grep "pid=${pid}" || echo ""`);
+      if (ssOutput && ssOutput.trim()) {
+        const lines = ssOutput.trim().split('\n');
+        // Filtrar líneas que no sean headers y que tengan el PID
+        const connections = lines.filter(line => {
+          const trimmed = line.trim();
+          return trimmed && 
+                 !trimmed.includes('State') && 
+                 !trimmed.includes('Netid') &&
+                 trimmed.includes(`pid=${pid}`);
+        });
+        activeConnections = connections.length;
+      }
+    } catch (error) {
+      logger.debug(`No se pudo usar ss para obtener conexiones del PID ${pid}:`, error.message);
+    }
+    
+    // Si ss no funcionó o no encontró conexiones, intentar con netstat
+    if (activeConnections === 0) {
       try {
-        // Obtener información de sockets abiertos por el proceso
-        const { stdout: lsof } = await execAsync(`lsof -p ${pid} -a -i 2>/dev/null | wc -l || echo "0"`);
-        activeConnections = parseInt(lsof.trim()) || 0;
-      } catch (error) {
-        // lsof puede no estar disponible
+        // netstat muestra conexiones con formato: tcp 0 0 192.168.1.12:3000 192.168.1.100:54321 ESTABLISHED 123/ffmpeg
+        const { stdout: netstat } = await execAsync(`netstat -tnp 2>/dev/null | grep "${pid}/" || echo ""`);
+        if (netstat && netstat.trim()) {
+          const lines = netstat.trim().split('\n');
+          const connections = lines.filter(line => {
+            const trimmed = line.trim();
+            return trimmed && 
+                   !trimmed.includes('Active') && 
+                   !trimmed.includes('Proto') &&
+                   trimmed.includes(`${pid}/`);
+          });
+          activeConnections = connections.length;
+        }
+      } catch (netstatError) {
+        logger.debug(`No se pudo usar netstat para obtener conexiones del PID ${pid}:`, netstatError.message);
       }
     }
     
-    // Obtener conexiones activas del proceso usando ss o netstat
-    try {
-      // Intentar con ss primero (más moderno)
-      const { stdout: ssOutput } = await execAsync(`ss -tnp 2>/dev/null | grep "pid=${pid}" || echo ""`);
-      if (ssOutput && ssOutput.trim()) {
-        const connections = ssOutput.trim().split('\n').filter(l => l && !l.includes('State') && !l.includes('Netid'));
-        activeConnections = connections.length;
-      } else {
-        // Fallback a netstat
-        try {
-          const { stdout: netstat } = await execAsync(`netstat -tnp 2>/dev/null | grep "${pid}/" || echo ""`);
-          if (netstat && netstat.trim()) {
-            const connections = netstat.trim().split('\n').filter(l => l && !l.includes('Active') && !l.includes('Proto'));
-            activeConnections = connections.length;
-          }
-        } catch (netstatError) {
-          // netstat puede no estar disponible
+    // Como último recurso, intentar con lsof (puede requerir permisos)
+    if (activeConnections === 0) {
+      try {
+        // lsof muestra sockets de red abiertos por el proceso
+        const { stdout: lsof } = await execAsync(`lsof -p ${pid} -a -i 2>/dev/null | grep -v "^COMMAND" | wc -l || echo "0"`);
+        const count = parseInt(lsof.trim()) || 0;
+        if (count > 0) {
+          activeConnections = count;
         }
+      } catch (error) {
+        // lsof puede no estar disponible o requerir permisos
+        logger.debug(`No se pudo usar lsof para obtener conexiones del PID ${pid}:`, error.message);
       }
-    } catch (error) {
-      logger.debug(`No se pudo obtener conexiones para PID ${pid}`);
     }
     
     return {
