@@ -90,16 +90,73 @@ class Channel {
   toJSON() {
     const { nameToSlug } = require('../utils/slug');
     const slug = nameToSlug(this.name);
-
-    // Agregar URLs de salida para outputs HLS
+    
+    // Objeto para almacenar todas las URLs de salida organizadas por tipo
+    const urlOutputs = {
+      hls: [],
+      udp: [],
+      dvb: [],
+      file: []
+    };
+    
+    // Procesar todos los outputs y generar URLs completas
     const outputsWithUrls = this.outputs.map(output => {
       if (output.type === 'hls') {
         const relativePath = `/media/${encodeURIComponent(slug)}/index.m3u8`;
+        const fullUrl = `${constants.BASE_URL}${relativePath}`;
+        
+        urlOutputs.hls.push({
+          url: relativePath,
+          fullUrl: fullUrl
+        });
+        
         return {
           ...output,
           url: relativePath,
-          fullUrl: `${constants.BASE_URL}${relativePath}`
+          fullUrl: fullUrl
         };
+      } else if (output.type === 'udp') {
+        // Construir URL UDP completa
+        let udpUrl = `udp://${output.host}:${output.port}`;
+        const params = [];
+        if (output.pkt_size) params.push(`pkt_size=${output.pkt_size}`);
+        if (output.buffer_size) params.push(`buffer_size=${output.buffer_size}`);
+        if (params.length > 0) udpUrl += '?' + params.join('&');
+        
+        urlOutputs.udp.push({
+          host: output.host,
+          port: output.port,
+          fullUrl: udpUrl
+        });
+        
+        return {
+          ...output,
+          fullUrl: udpUrl
+        };
+      } else if (output.type === 'dvb') {
+        // Para DVB, la URL depende de la configuración específica
+        // Por ahora, agregamos la información básica
+        urlOutputs.dvb.push({
+          path: output.path || null,
+          fullUrl: output.path || null
+        });
+        
+        return output;
+      } else if (output.type === 'file') {
+        // Para archivos, construir URL si hay path
+        if (output.path) {
+          const fileUrl = `${constants.BASE_URL}${output.path}`;
+          urlOutputs.file.push({
+            path: output.path,
+            fullUrl: fileUrl
+          });
+          
+          return {
+            ...output,
+            fullUrl: fileUrl
+          };
+        }
+        return output;
       }
       return output;
     });
@@ -111,6 +168,7 @@ class Channel {
       input_url: this.input_url,
       ffmpeg_params: this.ffmpeg_params,
       outputs: outputsWithUrls,
+      urlOutputs: urlOutputs,
       auto_restart: this.auto_restart,
       pid: this.pid,
       created_at: this.created_at,
