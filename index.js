@@ -24,6 +24,7 @@ const logService = require('./services/LogService');
 const initDatabase = require('./scripts/init-db');
 const channelRepository = require('./repositories/ChannelRepository');
 const setupStatsHandlers = require('./socket/statsHandler');
+const viewerTracking = require('./services/ViewerTrackingService');
 
 const app = express();
 const httpServer = createServer(app);
@@ -56,6 +57,12 @@ async function startServer() {
       if (!channel) {
         return res.status(404).json({ error: 'Canal no encontrado' });
       }
+
+      // Generar ID estable para este visualizador
+      const viewerId = viewerTracking.generateViewerId(req);
+
+      // Registrar actividad del visualizador
+      viewerTracking.recordViewerActivity(channel.id, viewerId);
 
       const filePath = path.join(constants.MEDIA_BASE_PATH, channel.id, 'index.m3u8');
 
@@ -92,6 +99,10 @@ async function startServer() {
       if (!channel) {
         return res.status(404).json({ error: 'Canal no encontrado' });
       }
+
+      // Registrar actividad del visualizador (cada segmento = actividad)
+      const viewerId = viewerTracking.generateViewerId(req);
+      viewerTracking.recordViewerActivity(channel.id, viewerId);
 
       const filePath = path.join(constants.MEDIA_BASE_PATH, channel.id, segment);
 
@@ -160,6 +171,41 @@ async function startServer() {
   // Rutas API
   app.use('/api/channels', channelsRouter);
   app.use('/api/auth', authRouter);
+
+  // Endpoint para obtener visualizadores de todos los canales
+  app.get('/api/stats/viewers', (req, res) => {
+    try {
+      const allCounts = viewerTracking.getAllViewerCounts();
+      res.json({
+        viewers: allCounts,
+        total: Object.values(allCounts).reduce((sum, count) => sum + count, 0),
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      logger.error('Error obteniendo visualizadores:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Endpoint para visualizadores de un canal específico
+  app.get('/api/channels/:id/viewers', async (req, res) => {
+    try {
+      const channel = await channelRepository.findById(req.params.id);
+      if (!channel) {
+        return res.status(404).json({ error: 'Canal no encontrado' });
+      }
+
+      const stats = viewerTracking.getViewerStats(req.params.id);
+      res.json({
+        channelId: req.params.id,
+        channelName: channel.name,
+        ...stats
+      });
+    } catch (error) {
+      logger.error('Error obteniendo visualizadores:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
 
   // Manejo de errores (debe ir al final)
   app.use(errorHandler);

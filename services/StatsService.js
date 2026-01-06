@@ -1,6 +1,7 @@
 const channelService = require('./ChannelService');
 const ffmpegManager = require('../managers/FFmpegManager');
 const logger = require('../utils/logger');
+const viewerTracking = require('./ViewerTrackingService');
 
 class StatsService {
   constructor() {
@@ -99,6 +100,9 @@ class StatsService {
         channel: channel.toJSON(),
         process: status.processInfo,
         ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
+        viewers: {
+          count: viewerTracking.getViewerCount(channelId)
+        },
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -187,6 +191,9 @@ class StatsService {
               channel: channel.toJSON(),
               process: status.processInfo,
               ffmpeg: ffmpegStats, // Estadísticas de transcodificación de FFmpeg
+              viewers: {
+                count: viewerTracking.getViewerCount(channel.id)
+              },
               timestamp: new Date().toISOString()
             };
           } catch (error) {
@@ -195,6 +202,9 @@ class StatsService {
               channel: channel.toJSON(),
               process: null,
               ffmpeg: null,
+              viewers: {
+                count: viewerTracking.getViewerCount(channel.id)
+              },
               error: error.message,
               timestamp: new Date().toISOString()
             };
