@@ -72,11 +72,16 @@ class FFmpegStatsParser {
       }
 
       // Extraer bitrate - múltiples formatos posibles
-      // Formato 1: bitrate=1677.7kbits/s o bitrate=1.5mbits/s (más común)
-      let bitrateMatch = line.match(/bitrate=\s*([\d.]+)\s*(kbits\/s|mbits\/s|bits\/s|kb\/s|mb\/s)/i);
-      if (bitrateMatch) {
+      // Formato 1: bitrate=1677.7kbits/s o bitrate=1.5mbits/s o bitrate=N/A
+      let bitrateMatch = line.match(/bitrate=\s*([\d.]+|N\/A)\s*(kbits\/s|mbits\/s|bits\/s|kb\/s|mb\/s)?/i);
+      
+      // Detectar si es N/A
+      if (bitrateMatch && bitrateMatch[1].toUpperCase() === 'N/A') {
+        stats.bitrate = null; // Marcar como N/A para calcular después
+        stats.bitrateFormatted = 'N/A';
+      } else if (bitrateMatch && bitrateMatch[1] !== 'N/A') {
         let bitrate = parseFloat(bitrateMatch[1]);
-        const unit = bitrateMatch[2].toLowerCase();
+        const unit = bitrateMatch[2] ? bitrateMatch[2].toLowerCase() : '';
         if (unit.includes('mbits') || unit.includes('mb/')) bitrate *= 1000; // Convertir a kbits/s
         else if (unit.includes('bits/') || (unit.includes('bits') && !unit.includes('k'))) bitrate /= 1000; // Convertir bits/s a kbits/s
         stats.bitrate = bitrate; // en kbits/s
@@ -90,9 +95,6 @@ class FFmpegStatsParser {
           if (unit === 'm') bitrate *= 1000; // Convertir a kbits/s
           stats.bitrate = bitrate; // en kbits/s
           stats.bitrateFormatted = `${bitrate.toFixed(2)} kbits/s`;
-        } else {
-          // Formato 3: bitrate N/A (calcular desde size y time si están disponibles)
-          // Esto se calculará después si tenemos size y time
         }
       }
       
@@ -101,6 +103,17 @@ class FFmpegStatsParser {
         // bitrate = (size * 8) / time (en kbits/s)
         stats.bitrate = (stats.size * 8) / (stats.time * 1000); // Convertir bytes a kbits
         stats.bitrateFormatted = `${stats.bitrate.toFixed(2)} kbits/s`;
+      }
+      
+      // Extraer dup (frames duplicados) y drop (frames descartados)
+      const dupMatch = line.match(/dup=(\d+)/);
+      if (dupMatch) {
+        stats.dup = parseInt(dupMatch[1], 10);
+      }
+      
+      const dropMatch = line.match(/drop=(\d+)/);
+      if (dropMatch) {
+        stats.drop = parseInt(dropMatch[1], 10);
       }
 
       // Extraer speed
