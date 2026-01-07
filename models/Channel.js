@@ -99,11 +99,14 @@ class Channel {
       file: []
     };
     
+    // Obtener BASE_URL dinámicamente para asegurar que siempre tenga la IP actual
+    const baseUrl = constants.getBaseURL();
+    
     // Procesar todos los outputs y generar URLs completas
     const outputsWithUrls = this.outputs.map(output => {
       if (output.type === 'hls') {
         const relativePath = `/media/${encodeURIComponent(slug)}/index.m3u8`;
-        const fullUrl = `${constants.BASE_URL}${relativePath}`;
+        const fullUrl = `${baseUrl}${relativePath}`;
         
         urlOutputs.hls.push({
           url: relativePath,
@@ -145,7 +148,7 @@ class Channel {
       } else if (output.type === 'file') {
         // Para archivos, construir URL si hay path
         if (output.path) {
-          const fileUrl = `${constants.BASE_URL}${output.path}`;
+          const fileUrl = `${baseUrl}${output.path}`;
           urlOutputs.file.push({
             path: output.path,
             fullUrl: fileUrl

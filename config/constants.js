@@ -67,7 +67,16 @@ module.exports = {
   PORT: process.env.PORT || 3000,
 
   // Base URL del servidor (para construir URLs completas)
-  BASE_URL: getBaseURL(),
+  // Se calcula dinámicamente cada vez que se accede para obtener la IP actual
+  get BASE_URL() {
+    return getBaseURL();
+  },
+
+  // Función para obtener BASE_URL dinámicamente (para uso explícito)
+  getBaseURL: getBaseURL,
+
+  // Función para obtener la IP del servidor
+  getServerIP: getServerIP,
 
   // Base de datos
   DB: {

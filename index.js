@@ -142,7 +142,7 @@ async function startServer() {
       status: 'running',
       version: '1.0.0',
       port: constants.PORT,
-      baseUrl: constants.BASE_URL
+      baseUrl: constants.getBaseURL()
     });
   });
 
