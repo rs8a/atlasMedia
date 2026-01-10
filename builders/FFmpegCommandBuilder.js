@@ -228,8 +228,6 @@ class FFmpegCommandBuilder {
       }
     } else if (hwCodec.includes('_vaapi')) {
       // VAAPI - requiere hwaccel y dispositivo ANTES del input
-      args.push('-hwaccel', 'vaapi');
-      
       let vaapiDevice;
       if (gpuIndex !== undefined && gpuIndex !== null) {
         // Obtener dispositivo según índice
@@ -239,6 +237,22 @@ class FFmpegCommandBuilder {
         // Usar dispositivo por defecto
         vaapiDevice = constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
       }
+      
+      // Verificar que el dispositivo existe y es accesible antes de usarlo
+      if (!fs.existsSync(vaapiDevice)) {
+        logger.error(`Dispositivo VAAPI ${vaapiDevice} no existe. VAAPI no estará disponible.`);
+        throw new Error(`Dispositivo VAAPI no encontrado: ${vaapiDevice}. Verifica que los dispositivos DRI estén disponibles en Docker (agrega devices: - /dev/dri:/dev/dri al docker-compose.yml)`);
+      }
+      
+      try {
+        fs.accessSync(vaapiDevice, fs.constants.R_OK);
+      } catch (error) {
+        logger.error(`Dispositivo VAAPI ${vaapiDevice} no es accesible: ${error.message}`);
+        throw new Error(`Dispositivo VAAPI no accesible: ${vaapiDevice}. Verifica los permisos del dispositivo DRI.`);
+      }
+      
+      // Solo agregar parámetros VAAPI si el dispositivo es válido
+      args.push('-hwaccel', 'vaapi');
       args.push('-vaapi_device', vaapiDevice);
     } else if (hwCodec.includes('_videotoolbox')) {
       // VideoToolbox - requiere hwaccel ANTES del input
