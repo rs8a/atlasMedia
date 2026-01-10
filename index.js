@@ -171,6 +171,7 @@ async function startServer() {
   // Rutas API
   app.use('/api/channels', channelsRouter);
   app.use('/api/auth', authRouter);
+  app.use('/api/hardware', require('./routes/hardware'));
 
   // Endpoint para obtener visualizadores de todos los canales
   app.get('/api/stats/viewers', (req, res) => {

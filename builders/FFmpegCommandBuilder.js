@@ -1,7 +1,9 @@
 const path = require('path');
 const { execSync } = require('child_process');
+const fs = require('fs');
 const constants = require('../config/constants');
 const logger = require('../utils/logger');
+const gpuDetectionService = require('../services/GPUDetectionService');
 
 class FFmpegCommandBuilder {
   constructor() {
@@ -138,30 +140,88 @@ class FFmpegCommandBuilder {
   }
 
   /**
+   * Obtiene el dispositivo VAAPI según el índice especificado
+   * @param {number} index - Índice del dispositivo (0, 1, 2, etc.)
+   * @returns {Promise<string>} Ruta del dispositivo
+   */
+  async _getVAAPIDeviceByIndex(index) {
+    try {
+      const gpus = await gpuDetectionService.detectGPUs();
+      const vaapiGPU = gpus.find(gpu => gpu.type === 'vaapi' && gpu.index === index);
+      
+      if (vaapiGPU && vaapiGPU.device) {
+        return vaapiGPU.device;
+      }
+      
+      // Fallback: construir ruta basada en índice
+      // renderD128 = índice 0, renderD129 = índice 1, etc.
+      const devicePath = `/dev/dri/renderD${128 + index}`;
+      if (fs.existsSync(devicePath)) {
+        return devicePath;
+      }
+    } catch (error) {
+      logger.warn(`Error obteniendo dispositivo VAAPI para índice ${index}:`, error.message);
+    }
+    
+    // Fallback final: usar el dispositivo por defecto
+    return constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
+  }
+
+  /**
    * Agrega parámetros de aceleración por hardware al comando FFmpeg
    * Estos argumentos deben agregarse ANTES del input (-i)
    * @param {Array} args - Array de argumentos FFmpeg
    * @param {string} hwCodec - Codec acelerado por hardware
+   * @param {Object} channel - Objeto del canal con ffmpeg_params (opcional, para obtener gpu_index)
    */
-  _addHardwareAccelerationArgs(args, hwCodec) {
+  async _addHardwareAccelerationArgs(args, hwCodec, channel = null) {
     if (!hwCodec) return;
+
+    // Obtener índice de GPU si está especificado
+    const gpuIndex = channel?.ffmpeg_params?.gpu_index;
+    const gpuType = channel?.ffmpeg_params?.gpu_type; // Opcional: tipo específico de GPU
 
     // Agregar parámetros específicos según el tipo de aceleración
     if (hwCodec.includes('_nvenc')) {
-      // NVIDIA NVENC - no requiere hwaccel, pero puede usar parámetros adicionales
+      // NVIDIA NVENC - usar -gpu para especificar índice de GPU
+      if (gpuIndex !== undefined && gpuIndex !== null) {
+        args.push('-gpu', gpuIndex.toString());
+        logger.debug(`Usando GPU NVIDIA índice ${gpuIndex} para NVENC`);
+      }
       // El preset se maneja en _processEncodingParams
     } else if (hwCodec.includes('_qsv')) {
       // Intel Quick Sync Video - requiere hwaccel ANTES del input
       args.push('-hwaccel', 'qsv');
       args.push('-hwaccel_output_format', 'qsv');
+      
+      // QSV puede usar -init_hw_device para especificar dispositivo si es necesario
+      // Por ahora, el índice generalmente no se necesita explícitamente para QSV
+      if (gpuIndex !== undefined && gpuIndex !== null) {
+        logger.debug(`Índice GPU ${gpuIndex} especificado para QSV (puede no ser necesario)`);
+      }
     } else if (hwCodec.includes('_vaapi')) {
       // VAAPI - requiere hwaccel y dispositivo ANTES del input
       args.push('-hwaccel', 'vaapi');
-      const vaapiDevice = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
+      
+      let vaapiDevice;
+      if (gpuIndex !== undefined && gpuIndex !== null) {
+        // Obtener dispositivo según índice
+        vaapiDevice = await this._getVAAPIDeviceByIndex(gpuIndex);
+        logger.debug(`Usando dispositivo VAAPI índice ${gpuIndex}: ${vaapiDevice}`);
+      } else {
+        // Usar dispositivo por defecto
+        vaapiDevice = constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
+      }
       args.push('-vaapi_device', vaapiDevice);
     } else if (hwCodec.includes('_videotoolbox')) {
       // VideoToolbox - requiere hwaccel ANTES del input
       args.push('-hwaccel', 'videotoolbox');
+      
+      // VideoToolbox en macOS generalmente no requiere índice explícito
+      // pero puede especificarse si hay múltiples GPUs
+      if (gpuIndex !== undefined && gpuIndex !== null) {
+        logger.debug(`Índice GPU ${gpuIndex} especificado para VideoToolbox (puede no ser necesario)`);
+      }
     }
   }
 
@@ -386,7 +446,7 @@ class FFmpegCommandBuilder {
   /**
    * Construye un comando FFmpeg genérico basado en la configuración
    */
-  buildCommand(channel, outputPath) {
+  async buildCommand(channel, outputPath) {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
@@ -399,7 +459,7 @@ class FFmpegCommandBuilder {
 
     // Agregar argumentos de aceleración por hardware ANTES del input
     if (hwCodec) {
-      this._addHardwareAccelerationArgs(args, hwCodec);
+      await this._addHardwareAccelerationArgs(args, hwCodec, channel);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -497,7 +557,7 @@ class FFmpegCommandBuilder {
   /**
    * Construye comando para stream UDP
    */
-  buildUDPCommand(channel, udpOutput) {
+  async buildUDPCommand(channel, udpOutput) {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
@@ -529,7 +589,7 @@ class FFmpegCommandBuilder {
 
     // Agregar argumentos de aceleración por hardware ANTES del input
     if (hwCodec) {
-      this._addHardwareAccelerationArgs(args, hwCodec);
+      await this._addHardwareAccelerationArgs(args, hwCodec, channel);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -717,7 +777,7 @@ class FFmpegCommandBuilder {
   /**
    * Construye comando para HLS
    */
-  buildHLSCommand(channel, outputPath) {
+  async buildHLSCommand(channel, outputPath) {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
@@ -734,7 +794,7 @@ class FFmpegCommandBuilder {
 
     // Agregar argumentos de aceleración por hardware ANTES del input
     if (hwCodec) {
-      this._addHardwareAccelerationArgs(args, hwCodec);
+      await this._addHardwareAccelerationArgs(args, hwCodec, channel);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -814,7 +874,7 @@ class FFmpegCommandBuilder {
   /**
    * Construye comando para DVB
    */
-  buildDVBCommand(channel, outputPath) {
+  async buildDVBCommand(channel, outputPath) {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
@@ -830,7 +890,7 @@ class FFmpegCommandBuilder {
 
     // Agregar argumentos de aceleración por hardware ANTES del input
     if (hwCodec) {
-      this._addHardwareAccelerationArgs(args, hwCodec);
+      await this._addHardwareAccelerationArgs(args, hwCodec, channel);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -891,18 +951,18 @@ class FFmpegCommandBuilder {
   /**
    * Determina el tipo de output y construye el comando apropiado
    */
-  buildCommandForOutput(channel, output, outputPath) {
+  async buildCommandForOutput(channel, output, outputPath) {
     if (output.type === 'udp') {
-      return this.buildUDPCommand(channel, output);
+      return await this.buildUDPCommand(channel, output);
     } else if (output.type === 'hls') {
-      return this.buildHLSCommand(channel, outputPath);
+      return await this.buildHLSCommand(channel, outputPath);
     } else if (output.type === 'dvb') {
-      return this.buildDVBCommand(channel, outputPath);
+      return await this.buildDVBCommand(channel, outputPath);
     } else if (output.type === 'file') {
-      return this.buildCommand(channel, outputPath);
+      return await this.buildCommand(channel, outputPath);
     } else {
       // Por defecto, comando genérico
-      return this.buildCommand(channel, outputPath);
+      return await this.buildCommand(channel, outputPath);
     }
   }
 }

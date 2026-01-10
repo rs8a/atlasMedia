@@ -54,7 +54,7 @@ class FFmpegManager extends EventEmitter {
       // Construir comandos para cada output
       const processes = [];
       for (const output of channel.outputs) {
-        const cmd = ffmpegBuilder.buildCommandForOutput(channel, output, outputPath);
+        const cmd = await ffmpegBuilder.buildCommandForOutput(channel, output, outputPath);
 
         logger.info(`Iniciando FFmpeg para canal ${channelId}, output: ${output.type}`);
         logger.debug(`Comando: ${cmd.command} ${cmd.args.join(' ')}`);
