@@ -245,14 +245,76 @@ class FFmpegCommandBuilder {
   }
 
   /**
-   * Procesa parámetros de encoding específicos (preset, tune, profile, etc.)
+   * Mapea presets de libx264/libx265 a presets de codecs acelerados por hardware
+   * @param {string} preset - Preset original (ej: veryfast, medium, slow)
+   * @param {string} codec - Codec que se está usando (ej: h264_nvenc, h264_qsv)
+   * @returns {string|null} Preset mapeado o null si no se necesita mapeo
    */
-  _processEncodingParams(args, ffmpegParams) {
+  _mapPresetForHardwareCodec(preset, codec) {
+    if (!preset || !codec) return null;
+
+    // Mapeo para NVENC (h264_nvenc, hevc_nvenc)
+    if (codec.includes('_nvenc')) {
+      const presetMap = {
+        'ultrafast': 'p1',
+        'superfast': 'p1',
+        'veryfast': 'p2',
+        'faster': 'p3',
+        'fast': 'p3',
+        'medium': 'p4',
+        'slow': 'p5',
+        'slower': 'p6',
+        'veryslow': 'p7'
+      };
+      const mapped = presetMap[preset.toLowerCase()];
+      if (mapped) {
+        logger.debug(`Mapeando preset "${preset}" a "${mapped}" para ${codec}`);
+        return mapped;
+      }
+      // Si el preset ya es p1-p7, usarlo directamente
+      if (/^p[1-7]$/i.test(preset)) {
+        return preset.toLowerCase();
+      }
+    }
+
+    // Para QSV, VAAPI y VideoToolbox, los presets de libx264 generalmente funcionan
+    // pero algunos pueden necesitar ajustes. Por ahora, retornamos null para usar el preset original
+    return null;
+  }
+
+  /**
+   * Procesa parámetros de encoding específicos (preset, tune, profile, etc.)
+   * @param {Array} args - Array de argumentos FFmpeg
+   * @param {Object} ffmpegParams - Parámetros de FFmpeg
+   * @param {string} videoCodec - Codec de video que se está usando (para mapeo de presets)
+   */
+  _processEncodingParams(args, ffmpegParams, videoCodec = null) {
     if (!ffmpegParams) return;
 
     // Preset (para libx264, libx265, etc.)
     if (ffmpegParams.preset) {
-      args.push('-preset', ffmpegParams.preset);
+      let preset = ffmpegParams.preset;
+      
+      // Si se está usando un codec acelerado por hardware, mapear el preset si es necesario
+      if (videoCodec) {
+        // Para NVENC, verificar si hay un preset específico en la variable de entorno
+        if (videoCodec.includes('_nvenc') && process.env.NVENC_PRESET) {
+          preset = process.env.NVENC_PRESET;
+          logger.debug(`Usando preset NVENC desde variable de entorno: ${preset}`);
+        } else {
+          // Mapear preset de libx264 a preset de hardware si es necesario
+          const mappedPreset = this._mapPresetForHardwareCodec(preset, videoCodec);
+          if (mappedPreset) {
+            preset = mappedPreset;
+          }
+        }
+      }
+      
+      args.push('-preset', preset);
+    } else if (videoCodec && videoCodec.includes('_nvenc') && process.env.NVENC_PRESET) {
+      // Si no hay preset en ffmpegParams pero se usa NVENC y hay preset en env, usarlo
+      args.push('-preset', process.env.NVENC_PRESET);
+      logger.debug(`Usando preset NVENC desde variable de entorno (sin preset en config): ${process.env.NVENC_PRESET}`);
     }
 
     // Tune (para libx264, libx265, etc.)
@@ -402,7 +464,8 @@ class FFmpegCommandBuilder {
       }
 
       // Parámetros de encoding (preset, tune, profile, etc.)
-      this._processEncodingParams(args, channel.ffmpeg_params);
+      const currentVideoCodec = hwCodec || videoCodec;
+      this._processEncodingParams(args, channel.ffmpeg_params, currentVideoCodec);
 
       // Procesar output_options (DESPUÉS de codecs y encoding params)
       if (channel.ffmpeg_params.output_options) {
@@ -559,7 +622,8 @@ class FFmpegCommandBuilder {
       }
 
       // Parámetros de encoding (preset, tune, profile, etc.)
-      this._processEncodingParams(args, channel.ffmpeg_params);
+      const currentVideoCodec = hwCodec || videoCodec;
+      this._processEncodingParams(args, channel.ffmpeg_params, currentVideoCodec);
 
       // Procesar output_options (DESPUÉS de codecs y encoding params)
       if (channel.ffmpeg_params.output_options) {
@@ -713,7 +777,8 @@ class FFmpegCommandBuilder {
       }
 
       // Parámetros de encoding (preset, tune, profile, etc.)
-      this._processEncodingParams(args, channel.ffmpeg_params);
+      const currentVideoCodec = hwCodec || videoCodec;
+      this._processEncodingParams(args, channel.ffmpeg_params, currentVideoCodec);
 
       // Procesar output_options (DESPUÉS de codecs y encoding params)
       if (channel.ffmpeg_params.output_options) {
@@ -794,15 +859,17 @@ class FFmpegCommandBuilder {
     // Codec
     if (channel.ffmpeg_params?.video_codec && channel.ffmpeg_params.video_codec !== 'copy') {
       // Codec de video - usar aceleración por hardware si está disponible
+      const videoCodec = channel.ffmpeg_params.video_codec;
       if (hwCodec) {
         args.push('-c:v', hwCodec);
       } else {
-        args.push('-c:v', channel.ffmpeg_params.video_codec);
+        args.push('-c:v', videoCodec);
       }
       args.push('-c:a', channel.ffmpeg_params.audio_codec || 'copy');
 
       // Parámetros de encoding (preset, tune, profile, etc.)
-      this._processEncodingParams(args, channel.ffmpeg_params);
+      const currentVideoCodec = hwCodec || videoCodec;
+      this._processEncodingParams(args, channel.ffmpeg_params, currentVideoCodec);
 
       // Procesar output_options (DESPUÉS de codecs y encoding params)
       if (channel.ffmpeg_params.output_options) {
