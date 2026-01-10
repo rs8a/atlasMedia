@@ -41,27 +41,33 @@ class GPUDetectionService {
       });
 
       // Patrones para detectar codecs por tipo
-      // Formato de ffmpeg -encoders: "V..... h264_nvenc           NVIDIA NVENC H.264 encoder"
+      // Formato de ffmpeg -encoders: "V....D h264_nvenc           NVIDIA NVENC H.264 encoder"
       // V = Video encoder, seguido de flags (puntos/letras), luego espacios y nombre del codec
-      // Usamos un patrón más flexible que busca "V" seguido de cualquier cosa hasta encontrar el codec
+      // Usamos un patrón más específico que busca el nombre del codec después de los flags
       const patterns = {
-        nvenc: /V[.\w]+\s+(\w+_nvenc)\s/g,
-        vaapi: /V[.\w]+\s+(\w+_vaapi)\s/g,
-        qsv: /V[.\w]+\s+(\w+_qsv)\s/g,
-        videotoolbox: /V[.\w]+\s+(\w+_videotoolbox)\s/g,
-        amf: /V[.\w]+\s+(\w+_amf)\s/g
+        nvenc: /\s+V[.\w]+\s+(\w+_nvenc)\s/,
+        vaapi: /\s+V[.\w]+\s+(\w+_vaapi)\s/,
+        qsv: /\s+V[.\w]+\s+(\w+_qsv)\s/,
+        videotoolbox: /\s+V[.\w]+\s+(\w+_videotoolbox)\s/,
+        amf: /\s+V[.\w]+\s+(\w+_amf)\s/
       };
 
-      // Buscar codecs para cada tipo
+      // Buscar codecs para cada tipo usando matchAll para encontrar todas las coincidencias
       for (const [type, pattern] of Object.entries(patterns)) {
+        // Crear un nuevo regex con flag global para cada iteración
+        const globalPattern = new RegExp(pattern.source, 'g');
         let match;
-        while ((match = pattern.exec(encodersOutput)) !== null) {
+        while ((match = globalPattern.exec(encodersOutput)) !== null) {
           const codecName = match[1];
-          if (!codecs[type].includes(codecName)) {
+          if (codecName && !codecs[type].includes(codecName)) {
             codecs[type].push(codecName);
+            logger.debug(`Codec ${codecName} detectado para tipo ${type}`);
           }
         }
       }
+      
+      // Log para debug
+      logger.debug('Codecs detectados por tipo:', JSON.stringify(codecs, null, 2));
 
       // Ordenar codecs por nombre
       for (const type of Object.keys(codecs)) {
