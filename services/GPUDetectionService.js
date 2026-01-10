@@ -11,6 +11,80 @@ class GPUDetectionService {
     this._detectionCache = null;
     this._cacheTimestamp = null;
     this._cacheTTL = 60000; // 60 segundos de cache
+    // Cache para codecs disponibles
+    this._codecsCache = null;
+  }
+
+  /**
+   * Detecta codecs disponibles usando ffmpeg -encoders
+   * @returns {Promise<Object>} Objeto con codecs agrupados por tipo
+   */
+  async _detectAvailableCodecs() {
+    // Retornar cache si existe
+    if (this._codecsCache) {
+      return this._codecsCache;
+    }
+
+    const codecs = {
+      nvenc: [],
+      vaapi: [],
+      qsv: [],
+      videotoolbox: [],
+      amf: []
+    };
+
+    try {
+      // Ejecutar ffmpeg -encoders para obtener todos los codecs disponibles
+      const encodersOutput = execSync(`${constants.FFMPEG_PATH} -hide_banner -encoders 2>&1`, {
+        encoding: 'utf8',
+        timeout: 5000
+      });
+
+      // Patrones para detectar codecs por tipo
+      // Formato de ffmpeg -encoders: "V..... h264_nvenc           NVIDIA NVENC H.264 encoder"
+      // V = Video encoder, seguido de flags (puntos/letras), luego espacios y nombre del codec
+      // Usamos un patrón más flexible que busca "V" seguido de cualquier cosa hasta encontrar el codec
+      const patterns = {
+        nvenc: /V[.\w]+\s+(\w+_nvenc)\s/g,
+        vaapi: /V[.\w]+\s+(\w+_vaapi)\s/g,
+        qsv: /V[.\w]+\s+(\w+_qsv)\s/g,
+        videotoolbox: /V[.\w]+\s+(\w+_videotoolbox)\s/g,
+        amf: /V[.\w]+\s+(\w+_amf)\s/g
+      };
+
+      // Buscar codecs para cada tipo
+      for (const [type, pattern] of Object.entries(patterns)) {
+        let match;
+        while ((match = pattern.exec(encodersOutput)) !== null) {
+          const codecName = match[1];
+          if (!codecs[type].includes(codecName)) {
+            codecs[type].push(codecName);
+          }
+        }
+      }
+
+      // Ordenar codecs por nombre
+      for (const type of Object.keys(codecs)) {
+        codecs[type].sort();
+      }
+
+      // Guardar en cache
+      this._codecsCache = codecs;
+    } catch (error) {
+      logger.warn('Error detectando codecs disponibles:', error.message);
+    }
+
+    return codecs;
+  }
+
+  /**
+   * Obtiene codecs compatibles para un tipo de GPU específico
+   * @param {string} gpuType - Tipo de GPU (nvenc, vaapi, qsv, videotoolbox, amf)
+   * @returns {Promise<Array>} Array de nombres de codecs compatibles
+   */
+  async _getCodecsForType(gpuType) {
+    const allCodecs = await this._detectAvailableCodecs();
+    return allCodecs[gpuType] || [];
   }
 
   /**
@@ -44,6 +118,10 @@ class GPUDetectionService {
       // Detectar VideoToolbox (macOS)
       const videotoolboxDevices = await this._detectVideoToolbox();
       gpus.push(...videotoolboxDevices);
+
+      // Detectar GPUs AMD (AMF)
+      const amfDevices = await this._detectAMF();
+      gpus.push(...amfDevices);
     } catch (error) {
       logger.error('Error detectando GPUs:', error);
     }
@@ -88,12 +166,16 @@ class GPUDetectionService {
 
           // Verificar que NVENC está disponible probando con FFmpeg
           const hasNVENC = await this._testNVENC(index);
+          
+          // Obtener codecs compatibles
+          const codecs = await this._getCodecsForType('nvenc');
 
           gpus.push({
             type: 'nvenc',
             index: index,
             name: name || `NVIDIA GPU ${index}`,
-            available: hasNVENC
+            available: hasNVENC,
+            codecs: codecs
           });
         }
       }
@@ -186,12 +268,16 @@ class GPUDetectionService {
             // vainfo no disponible o error, usar nombre genérico
           }
 
+          // Obtener codecs compatibles
+          const codecs = await this._getCodecsForType('vaapi');
+
           devices.push({
             type: 'vaapi',
             index: i,
             name: deviceInfo,
             device: devicePath,
-            available: hasVAAPISupport
+            available: hasVAAPISupport,
+            codecs: codecs
           });
         } catch (error) {
           // Dispositivo no accesible, saltar
@@ -234,20 +320,28 @@ class GPUDetectionService {
         // Filtrar dispositivos Intel (generalmente renderD128 es el primero)
         // Por ahora, asumimos que hay al menos un dispositivo QSV si hay codecs QSV disponibles
         if (renderDevices.length > 0) {
+          // Obtener codecs compatibles
+          const codecs = await this._getCodecsForType('qsv');
+          
           devices.push({
             type: 'qsv',
             index: 0,
             name: 'Intel Quick Sync Video',
-            available: true
+            available: true,
+            codecs: codecs
           });
         }
       } else {
         // Si no hay /dev/dri, aún puede haber QSV disponible (depende del sistema)
+        // Obtener codecs compatibles
+        const codecs = await this._getCodecsForType('qsv');
+        
         devices.push({
           type: 'qsv',
           index: 0,
           name: 'Intel Quick Sync Video',
-          available: true
+          available: true,
+          codecs: codecs
         });
       }
     } catch (error) {
@@ -277,15 +371,54 @@ class GPUDetectionService {
       });
 
       if (encodersOutput.includes('h264_videotoolbox') || encodersOutput.includes('hevc_videotoolbox')) {
+        // Obtener codecs compatibles
+        const codecs = await this._getCodecsForType('videotoolbox');
+        
         devices.push({
           type: 'videotoolbox',
           index: 0,
           name: 'VideoToolbox (macOS)',
-          available: true
+          available: true,
+          codecs: codecs
         });
       }
     } catch (error) {
       logger.debug('Error detectando VideoToolbox:', error.message);
+    }
+
+    return devices;
+  }
+
+  /**
+   * Detecta GPUs AMD con soporte AMF
+   * @returns {Promise<Array>} Array de dispositivos AMF
+   */
+  async _detectAMF() {
+    const devices = [];
+
+    try {
+      // Verificar que FFmpeg tiene soporte para AMF
+      const encodersOutput = execSync(`${constants.FFMPEG_PATH} -hide_banner -encoders 2>&1`, {
+        encoding: 'utf8',
+        timeout: 5000
+      });
+
+      // Verificar si hay codecs AMF disponibles
+      const amfCodecs = await this._getCodecsForType('amf');
+      
+      if (amfCodecs.length > 0) {
+        // AMF generalmente se usa con una sola GPU o se detecta automáticamente
+        // Por ahora, agregamos un dispositivo genérico
+        devices.push({
+          type: 'amf',
+          index: 0,
+          name: 'AMD Video Coding Engine (AMF)',
+          available: true,
+          codecs: amfCodecs
+        });
+      }
+    } catch (error) {
+      logger.debug('Error detectando dispositivos AMF:', error.message);
     }
 
     return devices;
@@ -297,6 +430,7 @@ class GPUDetectionService {
   clearCache() {
     this._detectionCache = null;
     this._cacheTimestamp = null;
+    this._codecsCache = null;
   }
 
   /**

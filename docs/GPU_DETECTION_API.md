@@ -19,42 +19,55 @@ Obtiene la lista de todas las tarjetas de video disponibles en el sistema con su
       "type": "nvenc",
       "index": 0,
       "name": "NVIDIA GeForce RTX 3080",
-      "available": true
+      "available": true,
+      "codecs": ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
     },
     {
       "type": "nvenc",
       "index": 1,
       "name": "NVIDIA GeForce RTX 3090",
-      "available": true
+      "available": true,
+      "codecs": ["h264_nvenc", "hevc_nvenc", "av1_nvenc"]
     },
     {
       "type": "vaapi",
       "index": 0,
       "name": "Intel UHD Graphics 630",
       "device": "/dev/dri/renderD128",
-      "available": true
+      "available": true,
+      "codecs": ["h264_vaapi", "hevc_vaapi", "mpeg2_vaapi", "vp8_vaapi", "vp9_vaapi"]
     },
     {
       "type": "vaapi",
       "index": 1,
       "name": "AMD Radeon RX 6800",
       "device": "/dev/dri/renderD129",
-      "available": true
+      "available": true,
+      "codecs": ["h264_vaapi", "hevc_vaapi", "mpeg2_vaapi", "vp8_vaapi", "vp9_vaapi"]
     },
     {
       "type": "qsv",
       "index": 0,
       "name": "Intel Quick Sync Video",
-      "available": true
+      "available": true,
+      "codecs": ["h264_qsv", "hevc_qsv", "mpeg2_qsv", "vp9_qsv"]
     },
     {
       "type": "videotoolbox",
       "index": 0,
       "name": "VideoToolbox (macOS)",
-      "available": true
+      "available": true,
+      "codecs": ["h264_videotoolbox", "hevc_videotoolbox"]
+    },
+    {
+      "type": "amf",
+      "index": 0,
+      "name": "AMD Video Coding Engine (AMF)",
+      "available": true,
+      "codecs": ["h264_amf", "hevc_amf", "av1_amf"]
     }
   ],
-  "total": 6,
+  "total": 7,
   "timestamp": "2024-01-15T10:30:00.000Z"
 }
 ```
@@ -62,20 +75,27 @@ Obtiene la lista de todas las tarjetas de video disponibles en el sistema con su
 #### Campos de la Respuesta
 
 - `gpus`: Array de objetos GPU detectados
-  - `type`: Tipo de aceleración (`nvenc`, `vaapi`, `qsv`, `videotoolbox`)
+  - `type`: Tipo de aceleración (`nvenc`, `vaapi`, `qsv`, `videotoolbox`, `amf`)
   - `index`: Índice numérico de la GPU (0, 1, 2, etc.)
   - `name`: Nombre descriptivo de la GPU
   - `device`: Ruta del dispositivo (solo para VAAPI)
   - `available`: Boolean indicando si la GPU está disponible para uso
+  - `codecs`: Array de nombres de codecs compatibles con esta GPU (ej: `["h264_nvenc", "hevc_nvenc"]`)
 - `total`: Número total de GPUs detectadas
 - `timestamp`: Fecha y hora de la detección
 
 #### Tipos de GPU
 
 1. **nvenc**: GPUs NVIDIA con soporte NVENC
+   - Codecs comunes: `h264_nvenc`, `hevc_nvenc`, `av1_nvenc`
 2. **vaapi**: Dispositivos VAAPI (Intel/AMD en Linux)
+   - Codecs comunes: `h264_vaapi`, `hevc_vaapi`, `mpeg2_vaapi`, `vp8_vaapi`, `vp9_vaapi`, `av1_vaapi`
 3. **qsv**: Intel Quick Sync Video
+   - Codecs comunes: `h264_qsv`, `hevc_qsv`, `mpeg2_qsv`, `vp9_qsv`, `av1_qsv`
 4. **videotoolbox**: VideoToolbox (solo macOS)
+   - Codecs comunes: `h264_videotoolbox`, `hevc_videotoolbox`
+5. **amf**: AMD Video Coding Engine (AMF)
+   - Codecs comunes: `h264_amf`, `hevc_amf`, `av1_amf`
 
 #### Ejemplo de Uso (JavaScript/Fetch)
 
