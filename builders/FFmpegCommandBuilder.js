@@ -240,15 +240,17 @@ class FFmpegCommandBuilder {
       
       // Verificar que el dispositivo existe y es accesible antes de usarlo
       if (!fs.existsSync(vaapiDevice)) {
-        logger.error(`Dispositivo VAAPI ${vaapiDevice} no existe. VAAPI no estará disponible.`);
-        throw new Error(`Dispositivo VAAPI no encontrado: ${vaapiDevice}. Verifica que los dispositivos DRI estén disponibles en Docker (agrega devices: - /dev/dri:/dev/dri al docker-compose.yml)`);
+        logger.warn(`Dispositivo VAAPI ${vaapiDevice} no existe. VAAPI no estará disponible.`);
+        // No lanzar error, simplemente no usar VAAPI (el codec se usará como software)
+        return;
       }
       
       try {
         fs.accessSync(vaapiDevice, fs.constants.R_OK);
       } catch (error) {
-        logger.error(`Dispositivo VAAPI ${vaapiDevice} no es accesible: ${error.message}`);
-        throw new Error(`Dispositivo VAAPI no accesible: ${vaapiDevice}. Verifica los permisos del dispositivo DRI.`);
+        logger.warn(`Dispositivo VAAPI ${vaapiDevice} no es accesible: ${error.message}. VAAPI no estará disponible.`);
+        // No lanzar error, simplemente no usar VAAPI (el codec se usará como software)
+        return;
       }
       
       // Solo agregar parámetros VAAPI si el dispositivo es válido
@@ -295,13 +297,32 @@ class FFmpegCommandBuilder {
   /**
    * Determina si se usará aceleración por hardware y retorna el codec
    * @param {Object} channel - Objeto del canal con ffmpeg_params
-   * @returns {string|null} Codec acelerado o null
+   * @returns {Promise<string|null>} Codec acelerado o null
    */
-  _determineHardwareCodec(channel) {
+  async _determineHardwareCodec(channel) {
     if (!channel.ffmpeg_params) return null;
     
     const requestedCodec = channel.ffmpeg_params.video_codec || 'copy';
-    return this._getHardwareVideoCodec(requestedCodec);
+    const hwCodec = this._getHardwareVideoCodec(requestedCodec);
+    
+    // Si el codec solicitado es VAAPI, verificar que realmente hay dispositivos VAAPI disponibles
+    if (hwCodec && hwCodec.includes('_vaapi')) {
+      try {
+        const gpus = await gpuDetectionService.detectGPUs();
+        const vaapiGPUs = gpus.filter(gpu => gpu.type === 'vaapi' && gpu.available);
+        
+        if (vaapiGPUs.length === 0) {
+          logger.warn(`Codec VAAPI solicitado (${hwCodec}) pero no hay dispositivos VAAPI disponibles. Usando codec de software.`);
+          // Retornar null para usar codec de software como fallback
+          return null;
+        }
+      } catch (error) {
+        logger.warn(`Error verificando disponibilidad de VAAPI: ${error.message}. Usando codec de software.`);
+        return null;
+      }
+    }
+    
+    return hwCodec;
   }
   /**
    * Procesa input_options y los agrega a args
@@ -517,7 +538,7 @@ class FFmpegCommandBuilder {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
-    const hwCodec = this._determineHardwareCodec(channel);
+    const hwCodec = await this._determineHardwareCodec(channel);
 
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
@@ -552,6 +573,16 @@ class FFmpegCommandBuilder {
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
         this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
+        // Si se solicitó un codec VAAPI pero no está disponible, usar codec de software equivalente
+        if (videoCodec.includes('_vaapi')) {
+          if (videoCodec.includes('h264')) {
+            videoCodec = 'libx264';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          } else if (videoCodec.includes('hevc') || videoCodec.includes('h265')) {
+            videoCodec = 'libx265';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          }
+        }
         args.push('-c:v', videoCodec);
       }
 
@@ -630,7 +661,7 @@ class FFmpegCommandBuilder {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
-    const hwCodec = this._determineHardwareCodec(channel);
+    const hwCodec = await this._determineHardwareCodec(channel);
 
     // Parámetro -re para streaming en tiempo real
     // NO usar para HLS en vivo (causa retraso), solo para archivos locales
@@ -712,6 +743,16 @@ class FFmpegCommandBuilder {
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
         this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
+        // Si se solicitó un codec VAAPI pero no está disponible, usar codec de software equivalente
+        if (videoCodec.includes('_vaapi')) {
+          if (videoCodec.includes('h264')) {
+            videoCodec = 'libx264';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          } else if (videoCodec.includes('hevc') || videoCodec.includes('h265')) {
+            videoCodec = 'libx265';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          }
+        }
         args.push('-c:v', videoCodec);
       }
 
@@ -852,7 +893,7 @@ class FFmpegCommandBuilder {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
-    const hwCodec = this._determineHardwareCodec(channel) || 
+    const hwCodec = await this._determineHardwareCodec(channel) || 
                     (process.env.FFMPEG_HWACCEL_AUTO === 'true' ? this._getHardwareVideoCodec('libx264') : null);
 
     // Procesar fflags (ANTES de -i)
@@ -890,6 +931,16 @@ class FFmpegCommandBuilder {
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
         this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
+        // Si se solicitó un codec VAAPI pero no está disponible, usar codec de software equivalente
+        if (videoCodec.includes('_vaapi')) {
+          if (videoCodec.includes('h264')) {
+            videoCodec = 'libx264';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          } else if (videoCodec.includes('hevc') || videoCodec.includes('h265')) {
+            videoCodec = 'libx265';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          }
+        }
         args.push('-c:v', videoCodec);
       }
 
@@ -953,10 +1004,27 @@ class FFmpegCommandBuilder {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
-    const hwCodec = channel.ffmpeg_params?.video_codec && 
-                    channel.ffmpeg_params.video_codec !== 'copy' 
-                    ? this._getHardwareVideoCodec(channel.ffmpeg_params.video_codec) 
-                    : null;
+    let hwCodec = null;
+    if (channel.ffmpeg_params?.video_codec && channel.ffmpeg_params.video_codec !== 'copy') {
+      const requestedCodec = channel.ffmpeg_params.video_codec;
+      hwCodec = this._getHardwareVideoCodec(requestedCodec);
+      
+      // Si el codec solicitado es VAAPI, verificar que realmente hay dispositivos VAAPI disponibles
+      if (hwCodec && hwCodec.includes('_vaapi')) {
+        try {
+          const gpus = await gpuDetectionService.detectGPUs();
+          const vaapiGPUs = gpus.filter(gpu => gpu.type === 'vaapi' && gpu.available);
+          
+          if (vaapiGPUs.length === 0) {
+            logger.warn(`Codec VAAPI solicitado (${hwCodec}) pero no hay dispositivos VAAPI disponibles. Usando codec de software.`);
+            hwCodec = null;
+          }
+        } catch (error) {
+          logger.warn(`Error verificando disponibilidad de VAAPI: ${error.message}. Usando codec de software.`);
+          hwCodec = null;
+        }
+      }
+    }
 
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
@@ -994,12 +1062,22 @@ class FFmpegCommandBuilder {
     // Codec
     if (channel.ffmpeg_params?.video_codec && channel.ffmpeg_params.video_codec !== 'copy') {
       // Codec de video - usar aceleración por hardware si está disponible
-      const videoCodec = channel.ffmpeg_params.video_codec;
+      let videoCodec = channel.ffmpeg_params.video_codec;
       if (hwCodec) {
         args.push('-c:v', hwCodec);
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
         this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
+        // Si se solicitó un codec VAAPI pero no está disponible, usar codec de software equivalente
+        if (videoCodec.includes('_vaapi')) {
+          if (videoCodec.includes('h264')) {
+            videoCodec = 'libx264';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          } else if (videoCodec.includes('hevc') || videoCodec.includes('h265')) {
+            videoCodec = 'libx265';
+            logger.info(`Codec VAAPI no disponible, usando codec de software equivalente: ${videoCodec}`);
+          }
+        }
         args.push('-c:v', videoCodec);
       }
       args.push('-c:a', channel.ffmpeg_params.audio_codec || 'copy');
