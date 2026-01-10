@@ -784,8 +784,26 @@ class FFmpegCommandBuilder {
       }
 
       // Filtros de video
-      if (channel.ffmpeg_params.video_filters) {
-        args.push('-vf', channel.ffmpeg_params.video_filters);
+      // Para codecs VAAPI y QSV, agregar filtros automáticamente si no se especificaron
+      let videoFilters = channel.ffmpeg_params.video_filters;
+      if (hwCodec) {
+        if (hwCodec.includes('_vaapi') && !videoFilters) {
+          // VAAPI requiere convertir a formato NV12 y subir a la GPU
+          // format=nv12 convierte a formato NV12 (compatible con VAAPI)
+          // hwupload sube el frame a la GPU para procesamiento por hardware
+          videoFilters = 'format=nv12,hwupload';
+          logger.debug(`Agregando filtros VAAPI automáticamente: ${videoFilters}`);
+        } else if (hwCodec.includes('_qsv') && !videoFilters) {
+          // QSV requiere convertir a formato QSV surface
+          // format=nv12 convierte a formato NV12
+          // hwupload=extra_hw_frames=64 sube el frame a la GPU con frames adicionales
+          videoFilters = 'format=nv12,hwupload=extra_hw_frames=64';
+          logger.debug(`Agregando filtros QSV automáticamente: ${videoFilters}`);
+        }
+      }
+
+      if (videoFilters) {
+        args.push('-vf', videoFilters);
       }
 
       // Filtros de audio
@@ -960,6 +978,29 @@ class FFmpegCommandBuilder {
         args.push('-s', channel.ffmpeg_params.resolution);
       }
 
+      // Filtros de video
+      // Para codecs VAAPI y QSV, agregar filtros automáticamente si no se especificaron
+      let videoFilters = channel.ffmpeg_params.video_filters;
+      if (hwCodec) {
+        if (hwCodec.includes('_vaapi') && !videoFilters) {
+          // VAAPI requiere convertir a formato NV12 y subir a la GPU
+          // format=nv12 convierte a formato NV12 (compatible con VAAPI)
+          // hwupload sube el frame a la GPU para procesamiento por hardware
+          videoFilters = 'format=nv12,hwupload';
+          logger.debug(`Agregando filtros VAAPI automáticamente: ${videoFilters}`);
+        } else if (hwCodec.includes('_qsv') && !videoFilters) {
+          // QSV requiere convertir a formato QSV surface
+          // format=nv12 convierte a formato NV12
+          // hwupload=extra_hw_frames=64 sube el frame a la GPU con frames adicionales
+          videoFilters = 'format=nv12,hwupload=extra_hw_frames=64';
+          logger.debug(`Agregando filtros QSV automáticamente: ${videoFilters}`);
+        }
+      }
+
+      if (videoFilters) {
+        args.push('-vf', videoFilters);
+      }
+
       // Parámetros de encoding (preset, tune, profile, etc.)
       const currentVideoCodec = hwCodec || videoCodec;
       this._processEncodingParams(args, channel.ffmpeg_params, currentVideoCodec);
@@ -1081,6 +1122,29 @@ class FFmpegCommandBuilder {
         args.push('-c:v', videoCodec);
       }
       args.push('-c:a', channel.ffmpeg_params.audio_codec || 'copy');
+
+      // Filtros de video
+      // Para codecs VAAPI y QSV, agregar filtros automáticamente si no se especificaron
+      let videoFilters = channel.ffmpeg_params.video_filters;
+      if (hwCodec) {
+        if (hwCodec.includes('_vaapi') && !videoFilters) {
+          // VAAPI requiere convertir a formato NV12 y subir a la GPU
+          // format=nv12 convierte a formato NV12 (compatible con VAAPI)
+          // hwupload sube el frame a la GPU para procesamiento por hardware
+          videoFilters = 'format=nv12,hwupload';
+          logger.debug(`Agregando filtros VAAPI automáticamente: ${videoFilters}`);
+        } else if (hwCodec.includes('_qsv') && !videoFilters) {
+          // QSV requiere convertir a formato QSV surface
+          // format=nv12 convierte a formato NV12
+          // hwupload=extra_hw_frames=64 sube el frame a la GPU con frames adicionales
+          videoFilters = 'format=nv12,hwupload=extra_hw_frames=64';
+          logger.debug(`Agregando filtros QSV automáticamente: ${videoFilters}`);
+        }
+      }
+
+      if (videoFilters) {
+        args.push('-vf', videoFilters);
+      }
 
       // Parámetros de encoding (preset, tune, profile, etc.)
       const currentVideoCodec = hwCodec || videoCodec;
