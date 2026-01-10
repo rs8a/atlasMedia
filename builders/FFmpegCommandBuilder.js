@@ -101,12 +101,12 @@ class FFmpegCommandBuilder {
     // Si se solicita un codec específico y no es 'copy', verificar si hay versión acelerada
     if (requestedCodec && requestedCodec !== 'copy') {
       const hwAccel = this._detectHardwareAcceleration();
-      
+
       // Si se solicita h264 o libx264, usar versión acelerada si está disponible
       if ((requestedCodec === 'h264' || requestedCodec === 'libx264') && hwAccel.codec) {
         return hwAccel.codec;
       }
-      
+
       // Si se solicita hevc o libx265, usar versión acelerada si está disponible
       if ((requestedCodec === 'hevc' || requestedCodec === 'libx265' || requestedCodec === 'h265')) {
         if (hwAccel.nvenc) {
@@ -119,10 +119,10 @@ class FFmpegCommandBuilder {
           return 'hevc_videotoolbox';
         }
       }
-      
+
       // Si el codec solicitado ya es acelerado, usarlo
-      if (requestedCodec.includes('_nvenc') || requestedCodec.includes('_qsv') || 
-          requestedCodec.includes('_vaapi') || requestedCodec.includes('_videotoolbox')) {
+      if (requestedCodec.includes('_nvenc') || requestedCodec.includes('_qsv') ||
+        requestedCodec.includes('_vaapi') || requestedCodec.includes('_videotoolbox')) {
         return requestedCodec;
       }
     }
@@ -148,7 +148,7 @@ class FFmpegCommandBuilder {
     try {
       const gpus = await gpuDetectionService.detectGPUs();
       const vaapiGPU = gpus.find(gpu => gpu.type === 'vaapi' && gpu.index === index);
-      
+
       if (vaapiGPU && vaapiGPU.device) {
         // Verificar que el dispositivo existe y es accesible
         if (fs.existsSync(vaapiGPU.device)) {
@@ -162,7 +162,7 @@ class FFmpegCommandBuilder {
           logger.warn(`Dispositivo VAAPI ${vaapiGPU.device} no existe`);
         }
       }
-      
+
       // Fallback: construir ruta basada en índice
       // renderD128 = índice 0, renderD129 = índice 1, etc.
       const devicePath = `/dev/dri/renderD${128 + index}`;
@@ -177,10 +177,10 @@ class FFmpegCommandBuilder {
     } catch (error) {
       logger.warn(`Error obteniendo dispositivo VAAPI para índice ${index}:`, error.message);
     }
-    
+
     // Fallback final: usar el dispositivo por defecto
     const defaultDevice = constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
-    
+
     // Verificar que el dispositivo por defecto existe
     if (fs.existsSync(defaultDevice)) {
       try {
@@ -192,7 +192,7 @@ class FFmpegCommandBuilder {
     } else {
       logger.warn(`Dispositivo VAAPI por defecto ${defaultDevice} no existe`);
     }
-    
+
     // Si ningún dispositivo está disponible, retornar el por defecto de todas formas
     // FFmpeg dará un error más claro si realmente no puede usarlo
     return defaultDevice;
@@ -220,7 +220,7 @@ class FFmpegCommandBuilder {
       // Intel Quick Sync Video - requiere hwaccel ANTES del input
       args.push('-hwaccel', 'qsv');
       args.push('-hwaccel_output_format', 'qsv');
-      
+
       // QSV puede usar -init_hw_device para especificar dispositivo si es necesario
       // Por ahora, el índice generalmente no se necesita explícitamente para QSV
       if (gpuIndex !== undefined && gpuIndex !== null) {
@@ -237,14 +237,14 @@ class FFmpegCommandBuilder {
         // Usar dispositivo por defecto
         vaapiDevice = constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
       }
-      
+
       // Verificar que el dispositivo existe y es accesible antes de usarlo
       if (!fs.existsSync(vaapiDevice)) {
         logger.warn(`Dispositivo VAAPI ${vaapiDevice} no existe. VAAPI no estará disponible.`);
         // No lanzar error, simplemente no usar VAAPI (el codec se usará como software)
         return;
       }
-      
+
       try {
         fs.accessSync(vaapiDevice, fs.constants.R_OK);
       } catch (error) {
@@ -252,14 +252,14 @@ class FFmpegCommandBuilder {
         // No lanzar error, simplemente no usar VAAPI (el codec se usará como software)
         return;
       }
-      
+
       // Solo agregar parámetros VAAPI si el dispositivo es válido
       args.push('-hwaccel', 'vaapi');
       args.push('-vaapi_device', vaapiDevice);
     } else if (hwCodec.includes('_videotoolbox')) {
       // VideoToolbox - requiere hwaccel ANTES del input
       args.push('-hwaccel', 'videotoolbox');
-      
+
       // VideoToolbox en macOS generalmente no requiere índice explícito
       // pero puede especificarse si hay múltiples GPUs
       if (gpuIndex !== undefined && gpuIndex !== null) {
@@ -301,16 +301,16 @@ class FFmpegCommandBuilder {
    */
   async _determineHardwareCodec(channel) {
     if (!channel.ffmpeg_params) return null;
-    
+
     const requestedCodec = channel.ffmpeg_params.video_codec || 'copy';
     const hwCodec = this._getHardwareVideoCodec(requestedCodec);
-    
+
     // Si el codec solicitado es VAAPI, verificar que realmente hay dispositivos VAAPI disponibles
     if (hwCodec && hwCodec.includes('_vaapi')) {
       try {
         const gpus = await gpuDetectionService.detectGPUs();
         const vaapiGPUs = gpus.filter(gpu => gpu.type === 'vaapi' && gpu.available);
-        
+
         if (vaapiGPUs.length === 0) {
           logger.warn(`Codec VAAPI solicitado (${hwCodec}) pero no hay dispositivos VAAPI disponibles. Usando codec de software.`);
           // Retornar null para usar codec de software como fallback
@@ -321,7 +321,7 @@ class FFmpegCommandBuilder {
         return null;
       }
     }
-    
+
     return hwCodec;
   }
   /**
@@ -442,7 +442,7 @@ class FFmpegCommandBuilder {
     // Preset (para libx264, libx265, etc.)
     if (ffmpegParams.preset) {
       let preset = ffmpegParams.preset;
-      
+
       // Si se está usando un codec acelerado por hardware, mapear el preset si es necesario
       if (videoCodec) {
         // Para NVENC, verificar si hay un preset específico en la variable de entorno
@@ -457,7 +457,7 @@ class FFmpegCommandBuilder {
           }
         }
       }
-      
+
       args.push('-preset', preset);
     } else if (videoCodec && videoCodec.includes('_nvenc') && process.env.NVENC_PRESET) {
       // Si no hay preset en ffmpegParams pero se usa NVENC y hay preset en env, usarlo
@@ -567,7 +567,7 @@ class FFmpegCommandBuilder {
     if (channel.ffmpeg_params) {
       // Codec de video - usar aceleración por hardware si está disponible
       let videoCodec = channel.ffmpeg_params.video_codec || 'copy';
-      
+
       if (hwCodec) {
         args.push('-c:v', hwCodec);
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
@@ -737,7 +737,7 @@ class FFmpegCommandBuilder {
     if (channel.ffmpeg_params) {
       // Codec de video - usar aceleración por hardware si está disponible
       let videoCodec = channel.ffmpeg_params.video_codec || 'copy';
-      
+
       if (hwCodec) {
         args.push('-c:v', hwCodec);
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
@@ -893,8 +893,8 @@ class FFmpegCommandBuilder {
     const args = [];
 
     // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
-    const hwCodec = await this._determineHardwareCodec(channel) || 
-                    (process.env.FFMPEG_HWACCEL_AUTO === 'true' ? this._getHardwareVideoCodec('libx264') : null);
+    const hwCodec = await this._determineHardwareCodec(channel) ||
+      (process.env.FFMPEG_HWACCEL_AUTO === 'true' ? this._getHardwareVideoCodec('libx264') : null);
 
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
@@ -925,7 +925,7 @@ class FFmpegCommandBuilder {
     if (channel.ffmpeg_params) {
       // Codec de video - usar aceleración por hardware si está disponible
       let videoCodec = channel.ffmpeg_params.video_codec || 'libx264';
-      
+
       if (hwCodec) {
         args.push('-c:v', hwCodec);
         // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
@@ -1008,13 +1008,13 @@ class FFmpegCommandBuilder {
     if (channel.ffmpeg_params?.video_codec && channel.ffmpeg_params.video_codec !== 'copy') {
       const requestedCodec = channel.ffmpeg_params.video_codec;
       hwCodec = this._getHardwareVideoCodec(requestedCodec);
-      
+
       // Si el codec solicitado es VAAPI, verificar que realmente hay dispositivos VAAPI disponibles
       if (hwCodec && hwCodec.includes('_vaapi')) {
         try {
           const gpus = await gpuDetectionService.detectGPUs();
           const vaapiGPUs = gpus.filter(gpu => gpu.type === 'vaapi' && gpu.available);
-          
+
           if (vaapiGPUs.length === 0) {
             logger.warn(`Codec VAAPI solicitado (${hwCodec}) pero no hay dispositivos VAAPI disponibles. Usando codec de software.`);
             hwCodec = null;
