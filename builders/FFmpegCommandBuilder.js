@@ -1,8 +1,181 @@
 const path = require('path');
+const { execSync } = require('child_process');
 const constants = require('../config/constants');
 const logger = require('../utils/logger');
 
 class FFmpegCommandBuilder {
+  constructor() {
+    // Cache para la detección de aceleración por hardware
+    this._hwAccelCache = null;
+  }
+
+  /**
+   * Detecta qué aceleración por hardware está disponible en el sistema
+   * @returns {Object} Objeto con información de aceleración disponible
+   */
+  _detectHardwareAcceleration() {
+    // Retornar cache si ya se detectó
+    if (this._hwAccelCache !== null) {
+      return this._hwAccelCache;
+    }
+
+    const result = {
+      nvenc: false,
+      qsv: false,
+      vaapi: false,
+      videotoolbox: false,
+      preferred: null,
+      codec: null
+    };
+
+    try {
+      // Ejecutar ffmpeg -hide_banner -encoders para ver codecs disponibles
+      const encodersOutput = execSync(`${constants.FFMPEG_PATH} -hide_banner -encoders 2>&1`, {
+        encoding: 'utf8',
+        timeout: 5000
+      });
+
+      // Detectar NVIDIA NVENC
+      if (encodersOutput.includes('h264_nvenc') || encodersOutput.includes('hevc_nvenc')) {
+        result.nvenc = true;
+        result.preferred = 'nvenc';
+        result.codec = 'h264_nvenc';
+        logger.info('Aceleración por hardware detectada: NVIDIA NVENC');
+      }
+
+      // Detectar Intel Quick Sync Video (QSV)
+      if (encodersOutput.includes('h264_qsv') || encodersOutput.includes('hevc_qsv')) {
+        result.qsv = true;
+        if (!result.preferred) {
+          result.preferred = 'qsv';
+          result.codec = 'h264_qsv';
+        }
+        logger.info('Aceleración por hardware detectada: Intel Quick Sync Video');
+      }
+
+      // Detectar VAAPI (Linux - Intel/AMD)
+      if (encodersOutput.includes('h264_vaapi') || encodersOutput.includes('hevc_vaapi')) {
+        result.vaapi = true;
+        if (!result.preferred) {
+          result.preferred = 'vaapi';
+          result.codec = 'h264_vaapi';
+        }
+        logger.info('Aceleración por hardware detectada: VAAPI');
+      }
+
+      // Detectar VideoToolbox (macOS)
+      if (encodersOutput.includes('h264_videotoolbox') || encodersOutput.includes('hevc_videotoolbox')) {
+        result.videotoolbox = true;
+        if (!result.preferred) {
+          result.preferred = 'videotoolbox';
+          result.codec = 'h264_videotoolbox';
+        }
+        logger.info('Aceleración por hardware detectada: VideoToolbox');
+      }
+
+      if (!result.preferred) {
+        logger.info('No se detectó aceleración por hardware, usando codecs de software');
+      }
+    } catch (error) {
+      logger.warn('Error detectando aceleración por hardware:', error.message);
+    }
+
+    // Guardar en cache
+    this._hwAccelCache = result;
+    return result;
+  }
+
+  /**
+   * Obtiene el codec de video acelerado por hardware apropiado
+   * @param {string} requestedCodec - Codec solicitado (opcional)
+   * @returns {string|null} Codec acelerado o null si no está disponible
+   */
+  _getHardwareVideoCodec(requestedCodec = null) {
+    // Si la aceleración por hardware está deshabilitada, retornar null
+    if (process.env.FFMPEG_HWACCEL_ENABLED === 'false') {
+      return null;
+    }
+
+    // Si se solicita un codec específico y no es 'copy', verificar si hay versión acelerada
+    if (requestedCodec && requestedCodec !== 'copy') {
+      const hwAccel = this._detectHardwareAcceleration();
+      
+      // Si se solicita h264 o libx264, usar versión acelerada si está disponible
+      if ((requestedCodec === 'h264' || requestedCodec === 'libx264') && hwAccel.codec) {
+        return hwAccel.codec;
+      }
+      
+      // Si se solicita hevc o libx265, usar versión acelerada si está disponible
+      if ((requestedCodec === 'hevc' || requestedCodec === 'libx265' || requestedCodec === 'h265')) {
+        if (hwAccel.nvenc) {
+          return 'hevc_nvenc';
+        } else if (hwAccel.qsv) {
+          return 'hevc_qsv';
+        } else if (hwAccel.vaapi) {
+          return 'hevc_vaapi';
+        } else if (hwAccel.videotoolbox) {
+          return 'hevc_videotoolbox';
+        }
+      }
+      
+      // Si el codec solicitado ya es acelerado, usarlo
+      if (requestedCodec.includes('_nvenc') || requestedCodec.includes('_qsv') || 
+          requestedCodec.includes('_vaapi') || requestedCodec.includes('_videotoolbox')) {
+        return requestedCodec;
+      }
+    }
+
+    // Si no se especifica codec o se está usando 'copy', usar aceleración si está disponible
+    // y si está habilitado el uso automático
+    if (!requestedCodec || requestedCodec === 'copy') {
+      if (process.env.FFMPEG_HWACCEL_AUTO === 'true') {
+        const hwAccel = this._detectHardwareAcceleration();
+        return hwAccel.codec;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Agrega parámetros de aceleración por hardware al comando FFmpeg
+   * Estos argumentos deben agregarse ANTES del input (-i)
+   * @param {Array} args - Array de argumentos FFmpeg
+   * @param {string} hwCodec - Codec acelerado por hardware
+   */
+  _addHardwareAccelerationArgs(args, hwCodec) {
+    if (!hwCodec) return;
+
+    // Agregar parámetros específicos según el tipo de aceleración
+    if (hwCodec.includes('_nvenc')) {
+      // NVIDIA NVENC - no requiere hwaccel, pero puede usar parámetros adicionales
+      // El preset se maneja en _processEncodingParams
+    } else if (hwCodec.includes('_qsv')) {
+      // Intel Quick Sync Video - requiere hwaccel ANTES del input
+      args.push('-hwaccel', 'qsv');
+      args.push('-hwaccel_output_format', 'qsv');
+    } else if (hwCodec.includes('_vaapi')) {
+      // VAAPI - requiere hwaccel y dispositivo ANTES del input
+      args.push('-hwaccel', 'vaapi');
+      const vaapiDevice = process.env.VAAPI_DEVICE || '/dev/dri/renderD128';
+      args.push('-vaapi_device', vaapiDevice);
+    } else if (hwCodec.includes('_videotoolbox')) {
+      // VideoToolbox - requiere hwaccel ANTES del input
+      args.push('-hwaccel', 'videotoolbox');
+    }
+  }
+
+  /**
+   * Determina si se usará aceleración por hardware y retorna el codec
+   * @param {Object} channel - Objeto del canal con ffmpeg_params
+   * @returns {string|null} Codec acelerado o null
+   */
+  _determineHardwareCodec(channel) {
+    if (!channel.ffmpeg_params) return null;
+    
+    const requestedCodec = channel.ffmpeg_params.video_codec || 'copy';
+    return this._getHardwareVideoCodec(requestedCodec);
+  }
   /**
    * Procesa input_options y los agrega a args
    * Soporta objeto (map), array o string
@@ -154,9 +327,17 @@ class FFmpegCommandBuilder {
   buildCommand(channel, outputPath) {
     const args = [];
 
+    // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
+    const hwCodec = this._determineHardwareCodec(channel);
+
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
       args.push('-fflags', channel.ffmpeg_params.fflags);
+    }
+
+    // Agregar argumentos de aceleración por hardware ANTES del input
+    if (hwCodec) {
+      this._addHardwareAccelerationArgs(args, hwCodec);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -174,11 +355,13 @@ class FFmpegCommandBuilder {
 
     // Parámetros de FFmpeg desde la configuración
     if (channel.ffmpeg_params) {
-      // Codec de video
-      if (channel.ffmpeg_params.video_codec) {
-        args.push('-c:v', channel.ffmpeg_params.video_codec);
+      // Codec de video - usar aceleración por hardware si está disponible
+      let videoCodec = channel.ffmpeg_params.video_codec || 'copy';
+      
+      if (hwCodec) {
+        args.push('-c:v', hwCodec);
       } else {
-        args.push('-c:v', 'copy'); // Por defecto, copiar sin transcodificar
+        args.push('-c:v', videoCodec);
       }
 
       // Codec de audio
@@ -254,6 +437,9 @@ class FFmpegCommandBuilder {
   buildUDPCommand(channel, udpOutput) {
     const args = [];
 
+    // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
+    const hwCodec = this._determineHardwareCodec(channel);
+
     // Parámetro -re para streaming en tiempo real
     // NO usar para HLS en vivo (causa retraso), solo para archivos locales
     // Puede desactivarse manualmente con realtime: false
@@ -276,6 +462,11 @@ class FFmpegCommandBuilder {
     } else if (isHLS) {
       // Por defecto para HLS si no se especifica fflags
       args.push('-fflags', '+genpts');
+    }
+
+    // Agregar argumentos de aceleración por hardware ANTES del input
+    if (hwCodec) {
+      this._addHardwareAccelerationArgs(args, hwCodec);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -321,11 +512,13 @@ class FFmpegCommandBuilder {
 
     // Aplicar parámetros de transcodificación
     if (channel.ffmpeg_params) {
-      // Codec de video
-      if (channel.ffmpeg_params.video_codec) {
-        args.push('-c:v', channel.ffmpeg_params.video_codec);
+      // Codec de video - usar aceleración por hardware si está disponible
+      let videoCodec = channel.ffmpeg_params.video_codec || 'copy';
+      
+      if (hwCodec) {
+        args.push('-c:v', hwCodec);
       } else {
-        args.push('-c:v', 'copy');
+        args.push('-c:v', videoCodec);
       }
 
       // Codec de audio
@@ -463,12 +656,21 @@ class FFmpegCommandBuilder {
   buildHLSCommand(channel, outputPath) {
     const args = [];
 
+    // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
+    const hwCodec = this._determineHardwareCodec(channel) || 
+                    (process.env.FFMPEG_HWACCEL_AUTO === 'true' ? this._getHardwareVideoCodec('libx264') : null);
+
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
       args.push('-fflags', channel.ffmpeg_params.fflags);
     } else {
       // Por defecto para HLS
       args.push('-fflags', '+genpts');
+    }
+
+    // Agregar argumentos de aceleración por hardware ANTES del input
+    if (hwCodec) {
+      this._addHardwareAccelerationArgs(args, hwCodec);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -485,10 +687,13 @@ class FFmpegCommandBuilder {
 
     // Parámetros de transcodificación
     if (channel.ffmpeg_params) {
-      if (channel.ffmpeg_params.video_codec) {
-        args.push('-c:v', channel.ffmpeg_params.video_codec);
+      // Codec de video - usar aceleración por hardware si está disponible
+      let videoCodec = channel.ffmpeg_params.video_codec || 'libx264';
+      
+      if (hwCodec) {
+        args.push('-c:v', hwCodec);
       } else {
-        args.push('-c:v', 'libx264'); // HLS requiere transcodificación típicamente
+        args.push('-c:v', videoCodec);
       }
 
       if (channel.ffmpeg_params.audio_codec) {
@@ -515,7 +720,12 @@ class FFmpegCommandBuilder {
         this._processOutputOptions(args, channel.ffmpeg_params.output_options);
       }
     } else {
-      args.push('-c:v', 'libx264');
+      // Para HLS, intentar usar aceleración por hardware si está disponible
+      if (hwCodec) {
+        args.push('-c:v', hwCodec);
+      } else {
+        args.push('-c:v', 'libx264');
+      }
       args.push('-c:a', 'aac');
     }
 
@@ -542,9 +752,20 @@ class FFmpegCommandBuilder {
   buildDVBCommand(channel, outputPath) {
     const args = [];
 
+    // Determinar si se usará aceleración por hardware (ANTES de agregar el input)
+    const hwCodec = channel.ffmpeg_params?.video_codec && 
+                    channel.ffmpeg_params.video_codec !== 'copy' 
+                    ? this._getHardwareVideoCodec(channel.ffmpeg_params.video_codec) 
+                    : null;
+
     // Procesar fflags (ANTES de -i)
     if (channel.ffmpeg_params?.fflags) {
       args.push('-fflags', channel.ffmpeg_params.fflags);
+    }
+
+    // Agregar argumentos de aceleración por hardware ANTES del input
+    if (hwCodec) {
+      this._addHardwareAccelerationArgs(args, hwCodec);
     }
 
     // Procesar input_options (ANTES de -i)
@@ -572,7 +793,12 @@ class FFmpegCommandBuilder {
 
     // Codec
     if (channel.ffmpeg_params?.video_codec && channel.ffmpeg_params.video_codec !== 'copy') {
-      args.push('-c:v', channel.ffmpeg_params.video_codec);
+      // Codec de video - usar aceleración por hardware si está disponible
+      if (hwCodec) {
+        args.push('-c:v', hwCodec);
+      } else {
+        args.push('-c:v', channel.ffmpeg_params.video_codec);
+      }
       args.push('-c:a', channel.ffmpeg_params.audio_codec || 'copy');
 
       // Parámetros de encoding (preset, tune, profile, etc.)

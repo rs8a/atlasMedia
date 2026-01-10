@@ -93,6 +93,14 @@ module.exports = {
   // FFmpeg
   FFMPEG_PATH: process.env.FFMPEG_PATH || 'ffmpeg',
 
+  // Aceleración por hardware FFmpeg
+  FFMPEG_HWACCEL: {
+    ENABLED: process.env.FFMPEG_HWACCEL_ENABLED !== 'false', // Por defecto habilitado
+    AUTO: process.env.FFMPEG_HWACCEL_AUTO === 'true', // Por defecto deshabilitado (requiere codec explícito)
+    VAAPI_DEVICE: process.env.VAAPI_DEVICE || '/dev/dri/renderD128', // Dispositivo VAAPI
+    NVENC_PRESET: process.env.NVENC_PRESET || null // Preset para NVENC (opcional)
+  },
+
   // Health Check
   HEALTH_CHECK_INTERVAL: parseInt(process.env.HEALTH_CHECK_INTERVAL || '30000', 10), // 30 segundos
 

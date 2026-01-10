@@ -4,6 +4,13 @@ services:
     container_name: atlas_app
     network_mode: host
     privileged: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules
