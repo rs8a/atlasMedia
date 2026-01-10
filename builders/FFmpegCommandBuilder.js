@@ -168,8 +168,8 @@ class FFmpegCommandBuilder {
   }
 
   /**
-   * Agrega parámetros de aceleración por hardware al comando FFmpeg
-   * Estos argumentos deben agregarse ANTES del input (-i)
+   * Agrega parámetros de aceleración por hardware ANTES del input (-i)
+   * Estos son parámetros de hardware acceleration para decodificación
    * @param {Array} args - Array de argumentos FFmpeg
    * @param {string} hwCodec - Codec acelerado por hardware
    * @param {Object} channel - Objeto del canal con ffmpeg_params (opcional, para obtener gpu_index)
@@ -179,16 +179,12 @@ class FFmpegCommandBuilder {
 
     // Obtener índice de GPU si está especificado
     const gpuIndex = channel?.ffmpeg_params?.gpu_index;
-    const gpuType = channel?.ffmpeg_params?.gpu_type; // Opcional: tipo específico de GPU
 
     // Agregar parámetros específicos según el tipo de aceleración
+    // NOTA: -gpu para NVENC NO va aquí, va después del input con el codec
     if (hwCodec.includes('_nvenc')) {
-      // NVIDIA NVENC - usar -gpu para especificar índice de GPU
-      if (gpuIndex !== undefined && gpuIndex !== null) {
-        args.push('-gpu', gpuIndex.toString());
-        logger.debug(`Usando GPU NVIDIA índice ${gpuIndex} para NVENC`);
-      }
-      // El preset se maneja en _processEncodingParams
+      // NVIDIA NVENC - no requiere parámetros antes del input
+      // El parámetro -gpu se agrega después con el codec
     } else if (hwCodec.includes('_qsv')) {
       // Intel Quick Sync Video - requiere hwaccel ANTES del input
       args.push('-hwaccel', 'qsv');
@@ -223,6 +219,32 @@ class FFmpegCommandBuilder {
         logger.debug(`Índice GPU ${gpuIndex} especificado para VideoToolbox (puede no ser necesario)`);
       }
     }
+  }
+
+  /**
+   * Agrega parámetros específicos del encoder de hardware DESPUÉS del input
+   * Estos son parámetros que van con el codec de salida (ej: -gpu para NVENC)
+   * @param {Array} args - Array de argumentos FFmpeg
+   * @param {string} hwCodec - Codec acelerado por hardware
+   * @param {Object} channel - Objeto del canal con ffmpeg_params (opcional, para obtener gpu_index)
+   */
+  _addHardwareEncoderArgs(args, hwCodec, channel = null) {
+    if (!hwCodec) return;
+
+    // Obtener índice de GPU si está especificado
+    const gpuIndex = channel?.ffmpeg_params?.gpu_index;
+
+    // Agregar parámetros específicos del encoder según el tipo
+    if (hwCodec.includes('_nvenc')) {
+      // NVIDIA NVENC - usar -gpu para especificar índice de GPU
+      // Este parámetro debe ir DESPUÉS del input, con el codec
+      if (gpuIndex !== undefined && gpuIndex !== null) {
+        args.push('-gpu', gpuIndex.toString());
+        logger.debug(`Usando GPU NVIDIA índice ${gpuIndex} para NVENC`);
+      }
+    }
+    // Para otros codecs, los parámetros de GPU generalmente no son necesarios aquí
+    // o se manejan de otra manera
   }
 
   /**
@@ -482,6 +504,8 @@ class FFmpegCommandBuilder {
       
       if (hwCodec) {
         args.push('-c:v', hwCodec);
+        // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
+        this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
         args.push('-c:v', videoCodec);
       }
@@ -640,6 +664,8 @@ class FFmpegCommandBuilder {
       
       if (hwCodec) {
         args.push('-c:v', hwCodec);
+        // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
+        this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
         args.push('-c:v', videoCodec);
       }
@@ -816,6 +842,8 @@ class FFmpegCommandBuilder {
       
       if (hwCodec) {
         args.push('-c:v', hwCodec);
+        // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
+        this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
         args.push('-c:v', videoCodec);
       }
@@ -848,6 +876,8 @@ class FFmpegCommandBuilder {
       // Para HLS, intentar usar aceleración por hardware si está disponible
       if (hwCodec) {
         args.push('-c:v', hwCodec);
+        // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
+        this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
         args.push('-c:v', 'libx264');
       }
@@ -922,6 +952,8 @@ class FFmpegCommandBuilder {
       const videoCodec = channel.ffmpeg_params.video_codec;
       if (hwCodec) {
         args.push('-c:v', hwCodec);
+        // Agregar parámetros específicos del encoder de hardware (ej: -gpu para NVENC)
+        this._addHardwareEncoderArgs(args, hwCodec, channel);
       } else {
         args.push('-c:v', videoCodec);
       }
