@@ -11,6 +11,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu, video]
+    # Dispositivos DRI para VAAPI (Intel/AMD)
+    devices:
+      - /dev/dri:/dev/dri
     volumes:
       - .:/usr/src/app
       - /usr/src/app/node_modules

@@ -150,21 +150,52 @@ class FFmpegCommandBuilder {
       const vaapiGPU = gpus.find(gpu => gpu.type === 'vaapi' && gpu.index === index);
       
       if (vaapiGPU && vaapiGPU.device) {
-        return vaapiGPU.device;
+        // Verificar que el dispositivo existe y es accesible
+        if (fs.existsSync(vaapiGPU.device)) {
+          try {
+            fs.accessSync(vaapiGPU.device, fs.constants.R_OK);
+            return vaapiGPU.device;
+          } catch (error) {
+            logger.warn(`Dispositivo VAAPI ${vaapiGPU.device} no es accesible:`, error.message);
+          }
+        } else {
+          logger.warn(`Dispositivo VAAPI ${vaapiGPU.device} no existe`);
+        }
       }
       
       // Fallback: construir ruta basada en índice
       // renderD128 = índice 0, renderD129 = índice 1, etc.
       const devicePath = `/dev/dri/renderD${128 + index}`;
       if (fs.existsSync(devicePath)) {
-        return devicePath;
+        try {
+          fs.accessSync(devicePath, fs.constants.R_OK);
+          return devicePath;
+        } catch (error) {
+          logger.warn(`Dispositivo VAAPI ${devicePath} no es accesible:`, error.message);
+        }
       }
     } catch (error) {
       logger.warn(`Error obteniendo dispositivo VAAPI para índice ${index}:`, error.message);
     }
     
     // Fallback final: usar el dispositivo por defecto
-    return constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
+    const defaultDevice = constants.FFMPEG_HWACCEL.VAAPI_DEVICE || '/dev/dri/renderD128';
+    
+    // Verificar que el dispositivo por defecto existe
+    if (fs.existsSync(defaultDevice)) {
+      try {
+        fs.accessSync(defaultDevice, fs.constants.R_OK);
+        return defaultDevice;
+      } catch (error) {
+        logger.warn(`Dispositivo VAAPI por defecto ${defaultDevice} no es accesible:`, error.message);
+      }
+    } else {
+      logger.warn(`Dispositivo VAAPI por defecto ${defaultDevice} no existe`);
+    }
+    
+    // Si ningún dispositivo está disponible, retornar el por defecto de todas formas
+    // FFmpeg dará un error más claro si realmente no puede usarlo
+    return defaultDevice;
   }
 
   /**
